@@ -1,0 +1,47 @@
+;buildInfoPackage: chisel3, version: 3.1.6, scalaVersion: 2.11.12, sbtVersion: 1.1.1, builtAtString: 2018-12-21 23:42:51.273, builtAtMillis: 1545435771273
+circuit RAS : 
+  module RAS : 
+    input clock : Clock
+    input reset : UInt<1>
+    output io : {flip push : {valid : UInt<1>, bits : UInt<32>}, peek : UInt<32>, flip pop : UInt<1>}
+    
+    reg stack : UInt<32>[8], clock @[RAS.scala 15:18]
+    reg pos : UInt<3>, clock with : (reset => (reset, UInt<3>("h00"))) @[RAS.scala 16:22]
+    reg count : UInt<4>, clock with : (reset => (reset, UInt<4>("h00"))) @[RAS.scala 17:22]
+    node empty = eq(count, UInt<1>("h00")) @[RAS.scala 18:27]
+    wire nextPos : UInt<3> @[RAS.scala 19:21]
+    wire prevPos : UInt<3> @[RAS.scala 20:21]
+    node _T_38 = add(pos, UInt<1>("h01")) @[RAS.scala 21:18]
+    node _T_39 = tail(_T_38, 1) @[RAS.scala 21:18]
+    nextPos <= _T_39 @[RAS.scala 21:11]
+    node _T_41 = sub(pos, UInt<1>("h01")) @[RAS.scala 22:18]
+    node _T_42 = asUInt(_T_41) @[RAS.scala 22:18]
+    node _T_43 = tail(_T_42, 1) @[RAS.scala 22:18]
+    prevPos <= _T_43 @[RAS.scala 22:11]
+    io.peek <= stack[pos] @[RAS.scala 24:11]
+    when io.push.valid : @[RAS.scala 26:23]
+      when io.pop : @[RAS.scala 27:18]
+        stack[pos] <= io.push.bits @[RAS.scala 28:18]
+        skip @[RAS.scala 27:18]
+      else : @[RAS.scala 29:17]
+        node _T_47 = neq(count, UInt<4>("h08")) @[RAS.scala 30:19]
+        when _T_47 : @[RAS.scala 30:31]
+          node _T_49 = add(count, UInt<1>("h01")) @[RAS.scala 30:48]
+          node _T_50 = tail(_T_49, 1) @[RAS.scala 30:48]
+          count <= _T_50 @[RAS.scala 30:39]
+          skip @[RAS.scala 30:31]
+        stack[nextPos] <= io.push.bits @[RAS.scala 31:22]
+        pos <= nextPos @[RAS.scala 32:11]
+        skip @[RAS.scala 29:17]
+      skip @[RAS.scala 26:23]
+    else : @[RAS.scala 34:31]
+      node _T_53 = eq(empty, UInt<1>("h00")) @[RAS.scala 34:23]
+      node _T_54 = and(io.pop, _T_53) @[RAS.scala 34:21]
+      when _T_54 : @[RAS.scala 34:31]
+        node _T_56 = sub(count, UInt<1>("h01")) @[RAS.scala 35:20]
+        node _T_57 = asUInt(_T_56) @[RAS.scala 35:20]
+        node _T_58 = tail(_T_57, 1) @[RAS.scala 35:20]
+        count <= _T_58 @[RAS.scala 35:11]
+        pos <= prevPos @[RAS.scala 36:9]
+        skip @[RAS.scala 34:31]
+    

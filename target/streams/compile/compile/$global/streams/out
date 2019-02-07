@@ -1,0 +1,7 @@
+[0m[[0m[31merror[0m] [0m[0m/home/albert/CPU/chiwen/src/main/scala/myCore/CaheCore.scala:76:57: chisel3.Bundle{val wen: chisel3.core.Bool; val addr: chisel3.core.UInt; val wdata: chisel3.core.UInt; val rdata: chisel3.core.UInt} does not take parameters[0m
+[0m[[0m[31merror[0m] [0m[0m      printf("%x, %x: %x | ", i.U, off_idx, data_RAMs(i)(off_idx))[0m
+[0m[[0m[31merror[0m] [0m[0m                                                        ^[0m
+[0m[[0m[31merror[0m] [0m[0m/home/albert/CPU/chiwen/src/main/scala/myCore/CaheCore.scala:78:53: chisel3.Bundle{val wen: chisel3.core.Bool; val addr: chisel3.core.UInt; val wdata: chisel3.core.UInt; val rdata: chisel3.core.UInt} does not take parameters[0m
+[0m[[0m[31merror[0m] [0m[0m    printf(" what = %x, %x\n", off_idx, data_RAMs(1)(off_idx))[0m
+[0m[[0m[31merror[0m] [0m[0m                                                    ^[0m
+[0m[[0m[31merror[0m] [0m[0mtwo errors found[0m

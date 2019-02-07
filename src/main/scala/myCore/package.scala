@@ -1,0 +1,1 @@
+package object myCore extends common.RISCVConstants with common.MemoryOpConstants
