@@ -2,7 +2,7 @@ package myCore
 
 import chisel3._
 import chisel3.util._
-import common.{CPUConfig, MemPortIo, Str}
+import common.{CPUConfig, Str}
 
 object LatchData {
   def apply(valid: Bool, data: UInt, init: UInt = 0.U): UInt = {
