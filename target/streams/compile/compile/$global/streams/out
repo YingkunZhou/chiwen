@@ -1,7 +1,7 @@
-[0m[[0m[31merror[0m] [0m[0m/home/albert/CPU/chiwen/src/main/scala/myCore/CaheCore.scala:76:57: chisel3.Bundle{val wen: chisel3.core.Bool; val addr: chisel3.core.UInt; val wdata: chisel3.core.UInt; val rdata: chisel3.core.UInt} does not take parameters[0m
-[0m[[0m[31merror[0m] [0m[0m      printf("%x, %x: %x | ", i.U, off_idx, data_RAMs(i)(off_idx))[0m
-[0m[[0m[31merror[0m] [0m[0m                                                        ^[0m
-[0m[[0m[31merror[0m] [0m[0m/home/albert/CPU/chiwen/src/main/scala/myCore/CaheCore.scala:78:53: chisel3.Bundle{val wen: chisel3.core.Bool; val addr: chisel3.core.UInt; val wdata: chisel3.core.UInt; val rdata: chisel3.core.UInt} does not take parameters[0m
-[0m[[0m[31merror[0m] [0m[0m    printf(" what = %x, %x\n", off_idx, data_RAMs(1)(off_idx))[0m
-[0m[[0m[31merror[0m] [0m[0m                                                    ^[0m
+[0m[[0m[31merror[0m] [0m[0m/home/albert/CPU/chiwen/src/main/scala/chiwen/Core.scala:293:89: value && is not a member of chisel3.core.UInt[0m
+[0m[[0m[31merror[0m] [0m[0m    mem_reg_jpnpc         := (Fill(conf.xprlen, alu.io.ctrl.pc_sel === PC_BRJMP).asUInt && alu.io.target.brjmp) ||[0m
+[0m[[0m[31merror[0m] [0m[0m                                                                                        ^[0m
+[0m[[0m[31merror[0m] [0m[0m/home/albert/CPU/chiwen/src/main/scala/chiwen/Core.scala:294:89: value && is not a member of chisel3.core.UInt[0m
+[0m[[0m[31merror[0m] [0m[0m                             (Fill(conf.xprlen, alu.io.ctrl.pc_sel === PC_JALR).asUInt  && alu.io.target.jpreg)[0m
+[0m[[0m[31merror[0m] [0m[0m                                                                                        ^[0m
 [0m[[0m[31merror[0m] [0m[0mtwo errors found[0m

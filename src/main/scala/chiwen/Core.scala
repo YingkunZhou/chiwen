@@ -20,21 +20,28 @@ class Core(implicit conf: CPUConfig) extends Module with BTBParams {
     val cyc  = Output(UInt(conf.xprlen.W))
   })
   io := DontCare
+  val inst = Module(new InstDecoder())
+  val alu = Module(new ALU())
+  val csr = Module(new CSRFile())
+  io.cyc := csr.io.time(conf.xprlen-1,0)
+  val pred = Module(new Predictor())
+  pred.io.cyc := io.cyc
+  val ras  = Module(new RAS(nRAS))
+  val fechi = Module(new FetchInst())
+  fechi.io.cyc := io.cyc
+
   val if_reg_pc           = RegInit(START_ADDR)
-  val dec_reg_pc          = Wire(UInt(conf.xprlen.W))
+  val dec_pc              = fechi.io.dec_pc
   val exe_reg_pc          = RegInit(START_ADDR)
   val mem_reg_pc          = RegInit(START_ADDR)
-  val dec_reg_inst        = Wire(UInt(conf.xprlen.W))
+  val dec_inst            = fechi.io.inst
   val exe_reg_inst        = RegInit(BUBBLE)
   val mem_reg_inst        = RegInit(BUBBLE)
-  val dec_reg_inst_valid  = Wire(Bool())
+  val dec_inst_valid      = fechi.io.inst_valid
   val exe_reg_inst_valid  = RegInit(false.B)
   val mem_reg_inst_valid  = RegInit(false.B)
 
   // Instruction Fetch Stage
-  val if_pc_next          = Wire(UInt(conf.xprlen.W))
-  val exe_brjmp_target    = Wire(UInt(conf.xprlen.W))
-  val exe_jpreg_target    = Wire(UInt(conf.xprlen.W))
   val mem_xcpt_target     = Wire(UInt(conf.xprlen.W))
   val fencei              = Wire(Bool())
   val xcpt                = Wire(Bool())
@@ -42,21 +49,12 @@ class Core(implicit conf: CPUConfig) extends Module with BTBParams {
   val mem_stall           = Wire(Bool())
   val if_kill             = Wire(Bool())
   val dec_kill            = Wire(Bool())
-  val exe_pc_sel          = Wire(UInt(2.W)) // include branch and jump type taken info
   val if_mispredict       = Wire(Bool())
   val dec_mispredict      = Wire(Bool())
 
-  val inst = Module(new InstDecoder())
-  val csr = Module(new CSRFile())
-  io.cyc := csr.io.time(conf.xprlen-1,0)
-  val pred = Module(new Predictor())
-  val ras  = Module(new RAS(nRAS))
-  pred.io.cyc := io.cyc
-  pred.io.pc        := if_reg_pc
-  pred.io.peekRAS   := ras.io.peek
-  val dec_reg_predTp  = Wire(UInt(CFIType.SZ.W))
-  val dec_reg_predTg  = Wire(UInt(conf.xprlen.W))
-  val dec_reg_predSel = Wire(UInt(log2Ceil(nEntries).W))
+  val dec_reg_predTp  = fechi.io.dec_pred.Tp
+  val dec_reg_predTg  = fechi.io.dec_pred.Tg
+  val dec_reg_predSel = fechi.io.dec_pred.Sel
   val dec_cfi_branch: Bool = inst.io.cinfo.cfi_branch
   val dec_cfi_jump: UInt   = inst.io.cinfo.cfi_jump
 
@@ -65,12 +63,13 @@ class Core(implicit conf: CPUConfig) extends Module with BTBParams {
   val exe_reg_predTp  = RegInit(CFIType.invalid.U(CFIType.SZ.W))
   val exe_reg_predTg  = Reg(UInt(conf.xprlen.W))
   val exe_reg_predSel = Reg(UInt(log2Ceil(nEntries).W))
+
   when ((dec_stall && !mem_stall) || xcpt) {
      exe_reg_predTp     := CFIType.invalid.U(CFIType.SZ.W)
      exe_reg_branch     := false.B
      exe_reg_jump       := 0.U(Jump.NUM.W)
   }.elsewhen(!mem_stall) {
-    when (dec_kill || !dec_reg_inst_valid) {
+    when (dec_kill || !dec_inst_valid) {
        exe_reg_predTp     := CFIType.invalid.U(CFIType.SZ.W)
        exe_reg_branch     := false.B
        exe_reg_jump       := 0.U(Jump.NUM.W)
@@ -83,15 +82,15 @@ class Core(implicit conf: CPUConfig) extends Module with BTBParams {
     }
   }
 
-  val exe_pc_plus4: UInt     = (exe_reg_pc + 4.U)(conf.xprlen-1,0) // FIXME: can forward if_pc_plus4 for time saver
-
   ras.io.pop        := exe_reg_jump(Jump.pop).toBool
   ras.io.push.valid := exe_reg_jump(Jump.push).toBool
-  ras.io.push.bits  := exe_pc_plus4
+  ras.io.push.bits  := alu.io.target.conti
 
+  pred.io.pc                 := if_reg_pc
+  pred.io.peekRAS            := ras.io.peek
   pred.io.feedBack.sel.valid := exe_reg_predTp =/= CFIType.invalid.U
   pred.io.feedBack.sel.bits  := exe_reg_predSel
-  pred.io.feedBack.redirect  := exe_pc_sel === PC_BRJMP || exe_pc_sel === PC_JALR
+  pred.io.feedBack.redirect  := alu.io.ctrl.pc_sel === PC_BRJMP || alu.io.ctrl.pc_sel === PC_JALR
   pred.io.feedBack.pc        := exe_reg_pc
   pred.io.feedBack.cfiType   := // include branch and jump type info
      Mux(exe_reg_branch,                                         CFIType.branch.U,
@@ -99,71 +98,59 @@ class Core(implicit conf: CPUConfig) extends Module with BTBParams {
      Mux(exe_reg_jump(Jump.none) || exe_reg_jump(Jump.push),     CFIType.jump.U,
                                                                  CFIType.invalid.U)))
   pred.io.feedBack.target    :=
-     Mux(exe_pc_sel === PC_BRJMP, exe_brjmp_target,
-     Mux(exe_pc_sel === PC_JALR,  exe_jpreg_target,
-                                  exe_pc_plus4))
+     Mux(alu.io.ctrl.pc_sel === PC_BRJMP, alu.io.target.brjmp,
+     Mux(alu.io.ctrl.pc_sel === PC_JALR,  alu.io.target.jpreg,
+                                          alu.io.target.conti))
+
+  val if_pc_next = Wire(UInt(conf.xprlen.W))
   if (conf.hasbrJPredictor) {
     val tg_mispredict = pred.io.feedBack.target  =/= exe_reg_predTg && pred.io.feedBack.cfiType =/= CFIType.invalid.U
 
     if_mispredict  := ((dec_cfi_jump(Jump.pop) && (ras.io.peek =/= dec_reg_predTg ||
-                        dec_reg_predTp =/= CFIType.retn.U)) && dec_reg_inst_valid) ||
+                        dec_reg_predTp =/= CFIType.retn.U)) && dec_inst_valid) ||
                        tg_mispredict
 
     dec_mispredict :=  tg_mispredict
 
     if_pc_next :=
-       Mux(exe_pc_sel === PC_EXC,   mem_xcpt_target,
+       Mux(xcpt,                    mem_xcpt_target,
        Mux(dec_mispredict,          pred.io.feedBack.target,
        Mux(if_mispredict,           ras.io.peek,
-       /*Mux(exe_pc_sel === PC_4,*/ pred.io.target.bits)))
+       /*Mux(alu.io.ctrl.pc_sel === PC_4,*/ pred.io.target.bits)))
   } else {
-    if_mispredict  := exe_pc_sel =/= PC_4
-    dec_mispredict := exe_pc_sel =/= PC_4
+    if_mispredict  := alu.io.ctrl.pc_sel =/= PC_4
+    dec_mispredict := alu.io.ctrl.pc_sel =/= PC_4
     val if_pc_plus: UInt = if_reg_pc + conf.pcInc.asUInt(conf.xprlen.W)
     if_pc_next :=
-      Mux(exe_pc_sel === PC_EXC,    mem_xcpt_target,
-      Mux(exe_pc_sel === PC_BRJMP,  exe_brjmp_target,
-      Mux(exe_pc_sel === PC_JALR,   exe_jpreg_target,
-      /*Mux(exe_pc_sel === PC_4,*/  if_pc_plus)))
+      Mux(xcpt,                             mem_xcpt_target,
+      Mux(alu.io.ctrl.pc_sel === PC_BRJMP,  alu.io.target.brjmp,
+      Mux(alu.io.ctrl.pc_sel === PC_JALR,   alu.io.target.jpreg,
+      /*Mux(alu.io.ctrl.pc_sel === PC_4,*/  if_pc_plus)))
   }
 
   // for a fencei, refetch the if_pc (assuming no stall, no branch, and no exception)
-  when (fencei && exe_pc_sel === PC_4 && !dec_stall /*&& !mem_stall*/ && !xcpt) {
+  when (fencei && alu.io.ctrl.pc_sel === PC_4 && !dec_stall /*&& !mem_stall*/ && !xcpt) {
     if_pc_next := if_reg_pc
   }
 
-  val fechi = Module(new FetchInst())
-  fechi.io.cyc := io.cyc
+  when (fechi.io.pc_forward) {
+    if_reg_pc := if_pc_next
+  }
+
   fechi.io.pc          := if_reg_pc
   fechi.io.if_pred.Tp  := pred.io.target.cifType
   fechi.io.if_pred.Tg  := pred.io.target.bits
   fechi.io.if_pred.Sel := pred.io.target.sel
   fechi.io.redirect    := if_kill || xcpt
   fechi.io.forward     := !dec_stall && !mem_stall
-  dec_reg_inst_valid   := fechi.io.inst_valid
-  dec_reg_inst         := fechi.io.inst
-  dec_reg_pc           := fechi.io.dec_pc
-  dec_reg_predTp       := fechi.io.dec_pred.Tp
-  dec_reg_predTg       := fechi.io.dec_pred.Tg
-  dec_reg_predSel      := fechi.io.dec_pred.Sel
   fechi.io.mem         <> io.imem
-
-  when (fechi.io.pc_forward) {
-    if_reg_pc := if_pc_next
-  }
 
   // Decode Stage ===========================================================================================================================================
   // ========================================================================================================================================================  
-  inst.io.inst.bits  := dec_reg_inst
-  inst.io.inst.valid := dec_reg_inst_valid
-  val dec_illegal: Bool = inst.io.cinfo.illegal //illegal instruction
-  // we need to stall IF while fencei goes through DEC and EXE, as there may
-  // be a store we need to wait to clear in MEM.
-  val exe_reg_fencei = RegInit(false.B)
-  fencei := inst.io.cinfo.fencei || exe_reg_fencei
+  inst.io.inst.bits  := dec_inst
+  inst.io.inst.valid := dec_inst_valid
 
    // Bypass Muxes
-  val exe_wbdata   = Wire(UInt(conf.xprlen.W))
   val mem_wbdata    = Wire(UInt(conf.xprlen.W))
   val wb_reg_wbdata = Reg(UInt(conf.xprlen.W))
 
@@ -182,8 +169,8 @@ class Core(implicit conf: CPUConfig) extends Module with BTBParams {
   val regfile = Module(new RegisterFile())
   regfile.io.rs1_addr := inst.io.cinfo.rs1_addr
   regfile.io.rs2_addr := inst.io.cinfo.rs2_addr
-  val rf_rs1_data = regfile.io.rs1_data
-  val rf_rs2_data = regfile.io.rs2_data
+  val rf_rs1_data: UInt = regfile.io.rs1_data
+  val rf_rs2_data: UInt = regfile.io.rs2_data
   regfile.io.waddr := wb_reg_wbaddr
   regfile.io.wdata := wb_reg_wbdata
   regfile.io.wen   := wb_reg_rf_wen
@@ -191,13 +178,13 @@ class Core(implicit conf: CPUConfig) extends Module with BTBParams {
   // roll the OP1 mux into the bypass mux logic
   dec_op1_data := MuxCase(rf_rs1_data, Array(
                        (inst.io.cinfo.op1_sel === OP1_IMZ)-> inst.io.dinfo.imm_z,
-                       (inst.io.cinfo.op1_sel === OP1_PC) -> dec_reg_pc,
-                       ((exe_reg_wbaddr === inst.io.cinfo.rs1_addr) && (inst.io.cinfo.rs1_addr =/= 0.U) && exe_reg_rf_wen) -> exe_wbdata,
+                       (inst.io.cinfo.op1_sel === OP1_PC) -> dec_pc,
+                       ((exe_reg_wbaddr === inst.io.cinfo.rs1_addr) && (inst.io.cinfo.rs1_addr =/= 0.U) && exe_reg_rf_wen) -> alu.io.alu_result,
                        ((mem_reg_wbaddr === inst.io.cinfo.rs1_addr) && (inst.io.cinfo.rs1_addr =/= 0.U) && mem_reg_rf_wen) -> mem_wbdata,
                        ((wb_reg_wbaddr  === inst.io.cinfo.rs1_addr) && (inst.io.cinfo.rs1_addr =/= 0.U) &&  wb_reg_rf_wen) -> wb_reg_wbdata))
 
   dec_rs2_data := MuxCase(rf_rs2_data, Array(
-                       ((exe_reg_wbaddr === inst.io.cinfo.rs2_addr) && (inst.io.cinfo.rs2_addr =/= 0.U) && exe_reg_rf_wen) -> exe_wbdata,
+                       ((exe_reg_wbaddr === inst.io.cinfo.rs2_addr) && (inst.io.cinfo.rs2_addr =/= 0.U) && exe_reg_rf_wen) -> alu.io.alu_result,
                        ((mem_reg_wbaddr === inst.io.cinfo.rs2_addr) && (inst.io.cinfo.rs2_addr =/= 0.U) && mem_reg_rf_wen) -> mem_wbdata,
                        ((wb_reg_wbaddr  === inst.io.cinfo.rs2_addr) && (inst.io.cinfo.rs2_addr =/= 0.U) &&  wb_reg_rf_wen) -> wb_reg_wbdata))
 
@@ -207,7 +194,6 @@ class Core(implicit conf: CPUConfig) extends Module with BTBParams {
                        (inst.io.cinfo.op2_sel === OP2_SBTYPE) -> inst.io.dinfo.imm_sb,
                        (inst.io.cinfo.op2_sel === OP2_UTYPE)  -> inst.io.dinfo.imm_u,
                        (inst.io.cinfo.op2_sel === OP2_UJTYPE) -> inst.io.dinfo.imm_uj))
-
 
   val exe_reg_mem_en   = RegInit(false.B)
   val exe_reg_csr_cmd  = RegInit(CSR.N)
@@ -221,6 +207,9 @@ class Core(implicit conf: CPUConfig) extends Module with BTBParams {
   val exe_reg_wb_sel   = Reg(UInt())
   val exe_reg_mem_fcn  = Reg(UInt())
   val exe_reg_mem_typ  = Reg(UInt())
+  // we need to stall IF while fencei goes through DEC and EXE, as there may
+  // be a store we need to wait to clear in MEM.
+  val exe_reg_fencei = RegInit(false.B)
   // critcal signals
   def flush_dec_exe = {
     exe_reg_rf_wen   := false.B
@@ -243,20 +232,18 @@ class Core(implicit conf: CPUConfig) extends Module with BTBParams {
     exe_reg_illegal  := inst.io.cinfo.illegal
     exe_reg_br_type  := inst.io.cinfo.br_type
     exe_reg_inst_valid := true.B
-    exe_reg_inst     := dec_reg_inst
+    exe_reg_inst     := dec_inst
     exe_reg_fencei   := inst.io.cinfo.fencei
   }
 
   when ((dec_stall && !mem_stall) || xcpt) {
-    // (kill exe stage)
-    // insert NOP (bubble) into Execute stage on front-end stall (e.g., hazard clearing)
+    // (kill exe stage) insert NOP (bubble) into Execute stage on front-end stall (e.g., hazard clearing)
     flush_dec_exe
   }.elsewhen(!mem_stall) {
-    when (dec_kill || !dec_reg_inst_valid) { flush_dec_exe }
+    when (dec_kill || !dec_inst_valid) { flush_dec_exe }
    .otherwise { forward_dec_exe }
      // data signals
-    exe_reg_pc            := dec_reg_pc
-
+    exe_reg_pc            := dec_pc
     exe_reg_op1_data      := dec_op1_data
     exe_reg_op2_data      := dec_op2_data
     exe_reg_rs2_data      := dec_rs2_data
@@ -271,52 +258,16 @@ class Core(implicit conf: CPUConfig) extends Module with BTBParams {
     // exe_reg_csr_cmd
   }
 
+  fencei := inst.io.cinfo.fencei || exe_reg_fencei
   // Execute Stage ==========================================================================================================================================
   //=========================================================================================================================================================
-
-  val exe_alu_op1: UInt   = exe_reg_op1_data.asUInt
-  val exe_alu_op2: UInt   = exe_reg_op2_data.asUInt
-  // ALU
-  val alu_shamt: UInt     = exe_alu_op2(4,0).asUInt
-  val exe_adder_out: UInt = (exe_alu_op1 + exe_alu_op2)(conf.xprlen-1,0)
-
-  //only for debug purposes right now until debug() works
-  val exe_alu_out = Wire(UInt(conf.xprlen.W))
-  exe_alu_out := MuxCase(0.U, Array(   // FIXME: why default is exe_reg_inst
-                (exe_reg_alu_fun === ALU_ADD)   -> exe_adder_out,
-                (exe_reg_alu_fun === ALU_SUB)   -> (exe_alu_op1 - exe_alu_op2).asUInt,
-                (exe_reg_alu_fun === ALU_AND)   -> (exe_alu_op1 & exe_alu_op2).asUInt,
-                (exe_reg_alu_fun === ALU_OR)    -> (exe_alu_op1 | exe_alu_op2).asUInt,
-                (exe_reg_alu_fun === ALU_XOR)   -> (exe_alu_op1 ^ exe_alu_op2).asUInt,
-                (exe_reg_alu_fun === ALU_SLT)   -> (exe_alu_op1.asSInt < exe_alu_op2.asSInt).asUInt,
-                (exe_reg_alu_fun === ALU_SLTU)  -> (exe_alu_op1 < exe_alu_op2).asUInt,
-                (exe_reg_alu_fun === ALU_SLL)   -> (exe_alu_op1 << alu_shamt)(conf.xprlen-1, 0).asUInt,
-                (exe_reg_alu_fun === ALU_SRA)   -> (exe_alu_op1.asSInt >> alu_shamt).asUInt,
-                (exe_reg_alu_fun === ALU_SRL)   -> (exe_alu_op1 >> alu_shamt).asUInt,
-                (exe_reg_alu_fun === ALU_COPY_1)->  exe_alu_op1,
-                (exe_reg_alu_fun === ALU_COPY_2)->  exe_alu_op2))
-
-  // Branch/Jump Target Calculation
-  exe_brjmp_target    := exe_reg_pc + exe_alu_op2
-  exe_jpreg_target    := Cat(exe_alu_out(31,1), 0.U(1.W))
-  exe_wbdata := Mux(exe_reg_wb_sel === WB_PC4, exe_pc_plus4, exe_alu_out)
-
-  val exe_br_eq: Bool  = exe_reg_op1_data === exe_reg_rs2_data
-  val exe_br_lt: Bool  = exe_reg_op1_data.asSInt < exe_reg_rs2_data.asSInt
-  val exe_br_ltu: Bool = exe_reg_op1_data.asUInt < exe_reg_rs2_data.asUInt
-
-  // Branch Logic
-  exe_pc_sel := Mux(xcpt                      , PC_EXC,
-                Mux(exe_reg_br_type === BR_N  , PC_4,
-                Mux(exe_reg_br_type === BR_NE , Mux(!exe_br_eq,  PC_BRJMP, PC_4),
-                Mux(exe_reg_br_type === BR_EQ , Mux( exe_br_eq,  PC_BRJMP, PC_4),
-                Mux(exe_reg_br_type === BR_GE , Mux(!exe_br_lt,  PC_BRJMP, PC_4),
-                Mux(exe_reg_br_type === BR_GEU, Mux(!exe_br_ltu, PC_BRJMP, PC_4),
-                Mux(exe_reg_br_type === BR_LT , Mux( exe_br_lt,  PC_BRJMP, PC_4),
-                Mux(exe_reg_br_type === BR_LTU, Mux( exe_br_ltu, PC_BRJMP, PC_4),
-                Mux(exe_reg_br_type === BR_J  , PC_BRJMP,
-                Mux(exe_reg_br_type === BR_JR , PC_JALR,
-                                                PC_4 ))))))))))
+  alu.io.alu_op1  := exe_reg_op1_data
+  alu.io.alu_op2  := exe_reg_op2_data
+  alu.io.rs2_data := exe_reg_rs2_data
+  alu.io.pc       := exe_reg_pc
+  alu.io.ctrl.fun := exe_reg_alu_fun
+  alu.io.ctrl.br_type := exe_reg_br_type
+  alu.io.ctrl.wb_sel  := exe_reg_wb_sel
 
   val mem_reg_mem_en   = RegInit(false.B)
   val mem_reg_csr_cmd  = RegInit(CSR.N)
@@ -339,13 +290,14 @@ class Core(implicit conf: CPUConfig) extends Module with BTBParams {
     mem_reg_mem_en        := exe_reg_mem_en
     mem_reg_csr_cmd       := exe_reg_csr_cmd
     mem_reg_illegal       := exe_reg_illegal
-    mem_reg_jpnpc         :=  Mux(exe_pc_sel === PC_BRJMP, exe_brjmp_target,
-                              Mux(exe_pc_sel === PC_JALR,  exe_jpreg_target, 0.U))
+    mem_reg_jpnpc         := (Fill(conf.xprlen, alu.io.ctrl.pc_sel === PC_BRJMP) & alu.io.target.brjmp) |
+                             (Fill(conf.xprlen, alu.io.ctrl.pc_sel === PC_JALR)  & alu.io.target.jpreg)
+
     mem_reg_inst_valid    := exe_reg_inst_valid
 
     mem_reg_pc            := exe_reg_pc
     mem_reg_inst          := exe_reg_inst
-    mem_reg_alu_out       := exe_wbdata
+    mem_reg_alu_out       := alu.io.alu_result
     mem_reg_wb_sel        := exe_reg_wb_sel
     mem_reg_wbaddr        := exe_reg_wbaddr
 
@@ -417,7 +369,7 @@ class Core(implicit conf: CPUConfig) extends Module with BTBParams {
 
   dec_stall := ((exe_inst_is_load && exe_reg_wbaddr === inst.io.cinfo.rs1_addr && exe_reg_wbaddr =/= 0.U && inst.io.cinfo.rs1_oen) ||
                 (exe_inst_is_load && exe_reg_wbaddr === inst.io.cinfo.rs2_addr && exe_reg_wbaddr =/= 0.U && inst.io.cinfo.rs2_oen)) &&
-                dec_reg_inst_valid || exe_reg_is_csr
+                dec_inst_valid || exe_reg_is_csr
 
   // stall(mem_stall) full pipeline on no response from memory
   mem_stall := mem_reg_mem_en && !io.dmem.resp.valid
@@ -432,16 +384,16 @@ class Core(implicit conf: CPUConfig) extends Module with BTBParams {
     , wb_reg_wbaddr
     , wb_reg_wbdata
     , if_reg_pc
-    , dec_reg_pc
+    , dec_pc
     , exe_reg_pc
     , mem_reg_pc
     , RegNext(mem_reg_pc)
     , Mux(mem_stall, Str("F"),             //FREEZE-> F 
       Mux(dec_stall, Str("S"), Str(" ")))  //STALL->S
-    , Mux(exe_pc_sel === 1.U, Str("B"),    //BJ -> B
-      Mux(exe_pc_sel === 2.U, Str("J"),    //JR -> J
-      Mux(exe_pc_sel === 3.U, Str("E"),    //EX -> E
-      Mux(exe_pc_sel === 0.U, Str(" "), Str("?")))))
+    , Mux(alu.io.ctrl.pc_sel === 1.U, Str("B"),    //BJ -> B
+      Mux(alu.io.ctrl.pc_sel === 2.U, Str("J"),    //JR -> J
+      Mux(alu.io.ctrl.pc_sel === 3.U, Str("E"),    //EX -> E
+      Mux(alu.io.ctrl.pc_sel === 0.U, Str(" "), Str("?")))))
     , Mux(csr.io.illegal, Str("X"), Str(" "))
     , Mux(xcpt, BUBBLE, exe_reg_inst)
     )

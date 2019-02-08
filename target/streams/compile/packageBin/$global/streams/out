@@ -264,6 +264,8 @@
 [0m[[0m[0mdebug[0m] [0m[0m	  /home/albert/CPU/chiwen/target/scala-2.11/classes/chiwen/Core$$anonfun$26.class[0m
 [0m[[0m[0mdebug[0m] [0m[0m	myCore/MyMem.class[0m
 [0m[[0m[0mdebug[0m] [0m[0m	  /home/albert/CPU/chiwen/target/scala-2.11/classes/myCore/MyMem.class[0m
+[0m[[0m[0mdebug[0m] [0m[0m	myCore/Target.class[0m
+[0m[[0m[0mdebug[0m] [0m[0m	  /home/albert/CPU/chiwen/target/scala-2.11/classes/myCore/Target.class[0m
 [0m[[0m[0mdebug[0m] [0m[0m	common/Util$UIntIsOneOf$$anonfun$isOneOf$extension0$2.class[0m
 [0m[[0m[0mdebug[0m] [0m[0m	  /home/albert/CPU/chiwen/target/scala-2.11/classes/common/Util$UIntIsOneOf$$anonfun$isOneOf$extension0$2.class[0m
 [0m[[0m[0mdebug[0m] [0m[0m	common/CSRFile$$anonfun$decodeAny$1.class[0m
@@ -764,6 +766,8 @@
 [0m[[0m[0mdebug[0m] [0m[0m	  /home/albert/CPU/chiwen/target/scala-2.11/classes/rv32_3stage/FrontEnd$$anonfun$5.class[0m
 [0m[[0m[0mdebug[0m] [0m[0m	myCore/RAS$$anonfun$3.class[0m
 [0m[[0m[0mdebug[0m] [0m[0m	  /home/albert/CPU/chiwen/target/scala-2.11/classes/myCore/RAS$$anonfun$3.class[0m
+[0m[[0m[0mdebug[0m] [0m[0m	myCore/ALU$$anon$1.class[0m
+[0m[[0m[0mdebug[0m] [0m[0m	  /home/albert/CPU/chiwen/target/scala-2.11/classes/myCore/ALU$$anon$1.class[0m
 [0m[[0m[0mdebug[0m] [0m[0m	myCore/BHTParams.class[0m
 [0m[[0m[0mdebug[0m] [0m[0m	  /home/albert/CPU/chiwen/target/scala-2.11/classes/myCore/BHTParams.class[0m
 [0m[[0m[0mdebug[0m] [0m[0m	myCore/Predictor$$anonfun$update_map$2$$anonfun$apply$mcV$sp$6$$anonfun$apply$1.class[0m
@@ -780,6 +784,8 @@
 [0m[[0m[0mdebug[0m] [0m[0m	  /home/albert/CPU/chiwen/target/scala-2.11/classes/common/SBCSFields.class[0m
 [0m[[0m[0mdebug[0m] [0m[0m	common/MemoryOpConstants.class[0m
 [0m[[0m[0mdebug[0m] [0m[0m	  /home/albert/CPU/chiwen/target/scala-2.11/classes/common/MemoryOpConstants.class[0m
+[0m[[0m[0mdebug[0m] [0m[0m	myCore/CtrlIO.class[0m
+[0m[[0m[0mdebug[0m] [0m[0m	  /home/albert/CPU/chiwen/target/scala-2.11/classes/myCore/CtrlIO.class[0m
 [0m[[0m[0mdebug[0m] [0m[0m	common/DebugModule$$anonfun$8.class[0m
 [0m[[0m[0mdebug[0m] [0m[0m	  /home/albert/CPU/chiwen/target/scala-2.11/classes/common/DebugModule$$anonfun$8.class[0m
 [0m[[0m[0mdebug[0m] [0m[0m	myCore/Predictor$$anonfun$13.class[0m
@@ -882,6 +888,8 @@
 [0m[[0m[0mdebug[0m] [0m[0m	  /home/albert/CPU/chiwen/target/scala-2.11/classes/rv32_3stage/Tile$$anonfun$1.class[0m
 [0m[[0m[0mdebug[0m] [0m[0m	rv32_3stage/package$.class[0m
 [0m[[0m[0mdebug[0m] [0m[0m	  /home/albert/CPU/chiwen/target/scala-2.11/classes/rv32_3stage/package$.class[0m
+[0m[[0m[0mdebug[0m] [0m[0m	myCore/ALU.class[0m
+[0m[[0m[0mdebug[0m] [0m[0m	  /home/albert/CPU/chiwen/target/scala-2.11/classes/myCore/ALU.class[0m
 [0m[[0m[0mdebug[0m] [0m[0m	common/RegEn.class[0m
 [0m[[0m[0mdebug[0m] [0m[0m	  /home/albert/CPU/chiwen/target/scala-2.11/classes/common/RegEn.class[0m
 [0m[[0m[0mdebug[0m] [0m[0m	rv32_1stage[0m
@@ -1024,6 +1032,8 @@
 [0m[[0m[0mdebug[0m] [0m[0m	  /home/albert/CPU/chiwen/target/scala-2.11/classes/chiwen/Tile$$anonfun$1.class[0m
 [0m[[0m[0mdebug[0m] [0m[0m	myCore/Icache$$anonfun$12.class[0m
 [0m[[0m[0mdebug[0m] [0m[0m	  /home/albert/CPU/chiwen/target/scala-2.11/classes/myCore/Icache$$anonfun$12.class[0m
+[0m[[0m[0mdebug[0m] [0m[0m	chiwen/Core$$anonfun$27.class[0m
+[0m[[0m[0mdebug[0m] [0m[0m	  /home/albert/CPU/chiwen/target/scala-2.11/classes/chiwen/Core$$anonfun$27.class[0m
 [0m[[0m[0mdebug[0m] [0m[0m	myCore/Icache$$anonfun$4.class[0m
 [0m[[0m[0mdebug[0m] [0m[0m	  /home/albert/CPU/chiwen/target/scala-2.11/classes/myCore/Icache$$anonfun$4.class[0m
 [0m[[0m[0mdebug[0m] [0m[0m	rv32_3stage/DatPath$$anonfun$8.class[0m
