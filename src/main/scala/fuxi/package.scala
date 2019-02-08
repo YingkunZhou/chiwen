@@ -1,0 +1,1 @@
+package object fuxi extends ScalarOpConstants with common.RISCVConstants with common.MemoryOpConstants
