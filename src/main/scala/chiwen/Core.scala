@@ -46,10 +46,7 @@ class Core(implicit conf: CPUConfig) extends Module with BTBParams {
   val if_mispredict       = Wire(Bool())
   val dec_mispredict      = Wire(Bool())
 
-  val dec_rs1_addr = dec_reg_inst(RS1_MSB, RS1_LSB)
-  val dec_rs2_addr = dec_reg_inst(RS2_MSB, RS2_LSB)
-  val dec_wbaddr   = dec_reg_inst(RD_MSB , RD_LSB)
-
+  val inst = Module(new InstDecoder())
   val csr = Module(new CSRFile())
   io.cyc := csr.io.time(conf.xprlen-1,0)
   val pred = Module(new Predictor())
@@ -60,37 +57,8 @@ class Core(implicit conf: CPUConfig) extends Module with BTBParams {
   val dec_reg_predTp  = Wire(UInt(CFIType.SZ.W))
   val dec_reg_predTg  = Wire(UInt(conf.xprlen.W))
   val dec_reg_predSel = Wire(UInt(log2Ceil(nEntries).W))
-
-  val func = dec_reg_inst(6,0)
-  val dec_cfi_branch: Bool = func === "b1100011".U
-  def link(addr: UInt): Bool = addr === 1.U || addr === 5.U
-  /*
-  * A JAL instruction should push the return address onto
-  * a return-address stack (RAS) only when rd=x1/x5
-  * JALR instructions should push/pop a RAS as shown in the Table:
-  *   rd    |   rs1    |    rs1 = rd    |   RAS action
-  * !link   |  !link   |        -       |   none
-  * !link   |   link   |        -       |   pop
-  *  link   |  !link   |        -       |   push
-  *  link   |   link   |        0       |   push and pop
-  *  link   |   link   |        1       |   push
-  */
-  val cfiType_jal: Bool  = func === "b1101111".U
-  val cfiType_jalr: Bool = func === "b1100111".U
-  val cifType_jump       = Wire(Vec(Jump.NUM, Bool()))
-  val pop_push: Bool     =  cfiType_jalr &&  link(dec_wbaddr) && link(dec_rs1_addr)  && dec_wbaddr =/= dec_rs1_addr
-  cifType_jump(Jump.none) := (cfiType_jalr && !link(dec_wbaddr) && !link(dec_rs1_addr))  || //case 1
-                             (cfiType_jal  && !link(dec_wbaddr))    // case 2
-
-  cifType_jump(Jump.push) := (cfiType_jal  &&  link(dec_wbaddr))||  // case 1
-                             (cfiType_jalr &&  link(dec_wbaddr) && !link(dec_rs1_addr)) || // case 2
-                             (cfiType_jalr &&  link(dec_wbaddr) &&  link(dec_rs1_addr)  && dec_wbaddr === dec_rs1_addr) || //case 3
-                              pop_push // case 4
-
-  cifType_jump(Jump.pop)  :=  cfiType_jalr && !link(dec_wbaddr) &&  link(dec_rs1_addr)  || //case 1
-                              pop_push // case 2
-
-  val dec_cfi_jump: UInt = cifType_jump.asUInt
+  val dec_cfi_branch: Bool = inst.io.cinfo.cfi_branch
+  val dec_cfi_jump: UInt   = inst.io.cinfo.cfi_jump
 
   val exe_reg_branch  = RegInit(false.B)
   val exe_reg_jump    = RegInit(0.U(Jump.NUM.W))
@@ -148,30 +116,16 @@ class Core(implicit conf: CPUConfig) extends Module with BTBParams {
        Mux(dec_mispredict,          pred.io.feedBack.target,
        Mux(if_mispredict,           ras.io.peek,
        /*Mux(exe_pc_sel === PC_4,*/ pred.io.target.bits)))
-//    when (io.cyc === 45280.U || io.cyc === 45300.U || io.cyc === 45298.U) {
-//      printf("target_type: %x, target_addr: %x, target_sel: %d, sel_valid: %x, sel_bits: %d, redirect: %x, pc: %x, cfiType: %x, target: %x\n"
-//      , pred.io.target.cifType
-//      , pred.io.target.bits
-//      , pred.io.target.sel
-//      , pred.io.feedBack.sel.valid
-//      , pred.io.feedBack.sel.bits
-//      , pred.io.feedBack.redirect
-//      , pred.io.feedBack.pc
-//      , pred.io.feedBack.cfiType
-//      , pred.io.feedBack.target
-//      )
-//    }
   } else {
     if_mispredict  := exe_pc_sel =/= PC_4
     dec_mispredict := exe_pc_sel =/= PC_4
-    val if_pc_plus4: UInt = if_reg_pc + 4.asUInt(conf.xprlen.W)
+    val if_pc_plus: UInt = if_reg_pc + conf.pcInc.asUInt(conf.xprlen.W)
     if_pc_next :=
       Mux(exe_pc_sel === PC_EXC,    mem_xcpt_target,
       Mux(exe_pc_sel === PC_BRJMP,  exe_brjmp_target,
       Mux(exe_pc_sel === PC_JALR,   exe_jpreg_target,
-      /*Mux(exe_pc_sel === PC_4,*/  if_pc_plus4)))
+      /*Mux(exe_pc_sel === PC_4,*/  if_pc_plus)))
   }
-
 
   // for a fencei, refetch the if_pc (assuming no stall, no branch, and no exception)
   when (fencei && exe_pc_sel === PC_4 && !dec_stall /*&& !mem_stall*/ && !xcpt) {
@@ -200,98 +154,13 @@ class Core(implicit conf: CPUConfig) extends Module with BTBParams {
 
   // Decode Stage ===========================================================================================================================================
   // ========================================================================================================================================================  
-
-  val dec_signals =
-    ListLookup(dec_reg_inst,
-                     List(N, BR_N  , OP1_X , OP2_X    , OEN_0, OEN_0, ALU_X   , WB_X  ,  REN_0, MEN_0, M_X  , MT_X, CSR.N, N),
-      Array(       /* val  |  BR  |  op1  |   op2     |  R1  |  R2  |  ALU    |  wb   | rf   | mem  | mem  | mask | csr | fence.i */
-        /* inst | type |   sel |    sel    |  oen |  oen |   fcn   |  sel  | wen  |  en  |  wr  | type | cmd |         */
-        LW     -> List(Y, BR_N  , OP1_RS1, OP2_ITYPE , OEN_1, OEN_0, ALU_ADD , WB_MEM, REN_1, MEN_1, M_XRD, MT_W, CSR.N, N),
-        LB     -> List(Y, BR_N  , OP1_RS1, OP2_ITYPE , OEN_1, OEN_0, ALU_ADD , WB_MEM, REN_1, MEN_1, M_XRD, MT_B, CSR.N, N),
-        LBU    -> List(Y, BR_N  , OP1_RS1, OP2_ITYPE , OEN_1, OEN_0, ALU_ADD , WB_MEM, REN_1, MEN_1, M_XRD, MT_BU,CSR.N, N),
-        LH     -> List(Y, BR_N  , OP1_RS1, OP2_ITYPE , OEN_1, OEN_0, ALU_ADD , WB_MEM, REN_1, MEN_1, M_XRD, MT_H, CSR.N, N),
-        LHU    -> List(Y, BR_N  , OP1_RS1, OP2_ITYPE , OEN_1, OEN_0, ALU_ADD , WB_MEM, REN_1, MEN_1, M_XRD, MT_HU,CSR.N, N),
-        SW     -> List(Y, BR_N  , OP1_RS1, OP2_STYPE , OEN_1, OEN_1, ALU_ADD , WB_X  , REN_0, MEN_1, M_XWR, MT_W, CSR.N, N),
-        SB     -> List(Y, BR_N  , OP1_RS1, OP2_STYPE , OEN_1, OEN_1, ALU_ADD , WB_X  , REN_0, MEN_1, M_XWR, MT_B, CSR.N, N),
-        SH     -> List(Y, BR_N  , OP1_RS1, OP2_STYPE , OEN_1, OEN_1, ALU_ADD , WB_X  , REN_0, MEN_1, M_XWR, MT_H, CSR.N, N),
-
-        AUIPC  -> List(Y, BR_N  , OP1_PC , OP2_UTYPE , OEN_0, OEN_0, ALU_ADD   ,WB_ALU,REN_1, MEN_0, M_X , MT_X,  CSR.N, N),
-        LUI    -> List(Y, BR_N  , OP1_X  , OP2_UTYPE , OEN_0, OEN_0, ALU_COPY_2,WB_ALU,REN_1, MEN_0, M_X , MT_X,  CSR.N, N),
-
-        ADDI   -> List(Y, BR_N  , OP1_RS1, OP2_ITYPE , OEN_1, OEN_0, ALU_ADD , WB_ALU, REN_1, MEN_0, M_X  , MT_X, CSR.N, N),
-        ANDI   -> List(Y, BR_N  , OP1_RS1, OP2_ITYPE , OEN_1, OEN_0, ALU_AND , WB_ALU, REN_1, MEN_0, M_X  , MT_X, CSR.N, N),
-        ORI    -> List(Y, BR_N  , OP1_RS1, OP2_ITYPE , OEN_1, OEN_0, ALU_OR  , WB_ALU, REN_1, MEN_0, M_X  , MT_X, CSR.N, N),
-        XORI   -> List(Y, BR_N  , OP1_RS1, OP2_ITYPE , OEN_1, OEN_0, ALU_XOR , WB_ALU, REN_1, MEN_0, M_X  , MT_X, CSR.N, N),
-        SLTI   -> List(Y, BR_N  , OP1_RS1, OP2_ITYPE , OEN_1, OEN_0, ALU_SLT , WB_ALU, REN_1, MEN_0, M_X  , MT_X, CSR.N, N),
-        SLTIU  -> List(Y, BR_N  , OP1_RS1, OP2_ITYPE , OEN_1, OEN_0, ALU_SLTU, WB_ALU, REN_1, MEN_0, M_X  , MT_X, CSR.N, N),
-        SLLI   -> List(Y, BR_N  , OP1_RS1, OP2_ITYPE , OEN_1, OEN_0, ALU_SLL , WB_ALU, REN_1, MEN_0, M_X  , MT_X, CSR.N, N),
-        SRAI   -> List(Y, BR_N  , OP1_RS1, OP2_ITYPE , OEN_1, OEN_0, ALU_SRA , WB_ALU, REN_1, MEN_0, M_X  , MT_X, CSR.N, N),
-        SRLI   -> List(Y, BR_N  , OP1_RS1, OP2_ITYPE , OEN_1, OEN_0, ALU_SRL , WB_ALU, REN_1, MEN_0, M_X  , MT_X, CSR.N, N),
-
-        SLL    -> List(Y, BR_N  , OP1_RS1, OP2_RS2   , OEN_1, OEN_1, ALU_SLL , WB_ALU, REN_1, MEN_0, M_X  , MT_X, CSR.N, N),
-        ADD    -> List(Y, BR_N  , OP1_RS1, OP2_RS2   , OEN_1, OEN_1, ALU_ADD , WB_ALU, REN_1, MEN_0, M_X  , MT_X, CSR.N, N),
-        SUB    -> List(Y, BR_N  , OP1_RS1, OP2_RS2   , OEN_1, OEN_1, ALU_SUB , WB_ALU, REN_1, MEN_0, M_X  , MT_X, CSR.N, N),
-        SLT    -> List(Y, BR_N  , OP1_RS1, OP2_RS2   , OEN_1, OEN_1, ALU_SLT , WB_ALU, REN_1, MEN_0, M_X  , MT_X, CSR.N, N),
-        SLTU   -> List(Y, BR_N  , OP1_RS1, OP2_RS2   , OEN_1, OEN_1, ALU_SLTU, WB_ALU, REN_1, MEN_0, M_X  , MT_X, CSR.N, N),
-        AND    -> List(Y, BR_N  , OP1_RS1, OP2_RS2   , OEN_1, OEN_1, ALU_AND , WB_ALU, REN_1, MEN_0, M_X  , MT_X, CSR.N, N),
-        OR     -> List(Y, BR_N  , OP1_RS1, OP2_RS2   , OEN_1, OEN_1, ALU_OR  , WB_ALU, REN_1, MEN_0, M_X  , MT_X, CSR.N, N),
-        XOR    -> List(Y, BR_N  , OP1_RS1, OP2_RS2   , OEN_1, OEN_1, ALU_XOR , WB_ALU, REN_1, MEN_0, M_X  , MT_X, CSR.N, N),
-        SRA    -> List(Y, BR_N  , OP1_RS1, OP2_RS2   , OEN_1, OEN_1, ALU_SRA , WB_ALU, REN_1, MEN_0, M_X  , MT_X, CSR.N, N),
-        SRL    -> List(Y, BR_N  , OP1_RS1, OP2_RS2   , OEN_1, OEN_1, ALU_SRL , WB_ALU, REN_1, MEN_0, M_X  , MT_X, CSR.N, N),
-
-        JAL    -> List(Y, BR_J  , OP1_RS1, OP2_UJTYPE, OEN_0, OEN_0, ALU_X   , WB_PC4, REN_1, MEN_0, M_X  , MT_X, CSR.N, N),
-        JALR   -> List(Y, BR_JR , OP1_RS1, OP2_ITYPE , OEN_1, OEN_0, ALU_ADD , WB_PC4, REN_1, MEN_0, M_X  , MT_X, CSR.N, N),
-        BEQ    -> List(Y, BR_EQ , OP1_RS1, OP2_SBTYPE, OEN_1, OEN_1, ALU_X   , WB_X  , REN_0, MEN_0, M_X  , MT_X, CSR.N, N),
-        BNE    -> List(Y, BR_NE , OP1_RS1, OP2_SBTYPE, OEN_1, OEN_1, ALU_X   , WB_X  , REN_0, MEN_0, M_X  , MT_X, CSR.N, N),
-        BGE    -> List(Y, BR_GE , OP1_RS1, OP2_SBTYPE, OEN_1, OEN_1, ALU_X   , WB_X  , REN_0, MEN_0, M_X  , MT_X, CSR.N, N),
-        BGEU   -> List(Y, BR_GEU, OP1_RS1, OP2_SBTYPE, OEN_1, OEN_1, ALU_X   , WB_X  , REN_0, MEN_0, M_X  , MT_X, CSR.N, N),
-        BLT    -> List(Y, BR_LT , OP1_RS1, OP2_SBTYPE, OEN_1, OEN_1, ALU_X   , WB_X  , REN_0, MEN_0, M_X  , MT_X, CSR.N, N),
-        BLTU   -> List(Y, BR_LTU, OP1_RS1, OP2_SBTYPE, OEN_1, OEN_1, ALU_X   , WB_X  , REN_0, MEN_0, M_X  , MT_X, CSR.N, N),
-
-        CSRRWI -> List(Y, BR_N  , OP1_IMZ, OP2_X     , OEN_1, OEN_1, ALU_COPY_1,WB_CSR,REN_1, MEN_0, M_X  , MT_X, CSR.W, N),
-        CSRRSI -> List(Y, BR_N  , OP1_IMZ, OP2_X     , OEN_1, OEN_1, ALU_COPY_1,WB_CSR,REN_1, MEN_0, M_X  , MT_X, CSR.S, N),
-        CSRRW  -> List(Y, BR_N  , OP1_RS1, OP2_X     , OEN_1, OEN_1, ALU_COPY_1,WB_CSR,REN_1, MEN_0, M_X  , MT_X, CSR.W, N),
-        CSRRS  -> List(Y, BR_N  , OP1_RS1, OP2_X     , OEN_1, OEN_1, ALU_COPY_1,WB_CSR,REN_1, MEN_0, M_X  , MT_X, CSR.S, N),
-        CSRRC  -> List(Y, BR_N  , OP1_RS1, OP2_X     , OEN_1, OEN_1, ALU_COPY_1,WB_CSR,REN_1, MEN_0, M_X  , MT_X, CSR.C, N),
-        CSRRCI -> List(Y, BR_N  , OP1_IMZ, OP2_X     , OEN_1, OEN_1, ALU_COPY_1,WB_CSR,REN_1, MEN_0, M_X  , MT_X, CSR.C, N),
-
-        ECALL  -> List(Y, BR_N  , OP1_X  , OP2_X     , OEN_0, OEN_0, ALU_X   , WB_X  , REN_0, MEN_0, M_X  , MT_X, CSR.I, N),
-        MRET   -> List(Y, BR_N  , OP1_X  , OP2_X     , OEN_0, OEN_0, ALU_X   , WB_X  , REN_0, MEN_0, M_X  , MT_X, CSR.I, N),
-        DRET   -> List(Y, BR_N  , OP1_X  , OP2_X     , OEN_0, OEN_0, ALU_X   , WB_X  , REN_0, MEN_0, M_X  , MT_X, CSR.I, N),
-        EBREAK -> List(Y, BR_N  , OP1_X  , OP2_X     , OEN_0, OEN_0, ALU_X   , WB_X  , REN_0, MEN_0, M_X  , MT_X, CSR.I, N),
-        WFI    -> List(Y, BR_N  , OP1_X  , OP2_X     , OEN_0, OEN_0, ALU_X   , WB_X  , REN_0, MEN_0, M_X  , MT_X, CSR.N, N), // implemented as a NOP
-
-        FENCE_I-> List(Y, BR_N  , OP1_X  , OP2_X     , OEN_0, OEN_0, ALU_X   , WB_X  , REN_0, MEN_0, M_X  , MT_X, CSR.N, Y),
-        // kill pipeline and refetch instructions since the pipeline will be holding stall instructions.
-        FENCE  -> List(Y, BR_N  , OP1_X  , OP2_X     , OEN_0, OEN_0, ALU_X   , WB_X  , REN_0, MEN_1, M_X  , MT_X, CSR.N, N)
-        // we are already sequentially consistent, so no need to honor the fence instruction
-      ))
-
-  // Put these control signals in variables
-  val (dec_val_inst: Bool) :: dec_br_type :: dec_op1_sel :: dec_op2_sel :: (dec_rs1_oen: Bool) :: (dec_rs2_oen: Bool) :: dec0 = dec_signals
-  val dec_alu_fun :: dec_wb_sel :: (dec_rf_wen: Bool) :: (dec_mem_en: Bool) :: dec_mem_fcn :: dec_mem_typ :: dec_csr_cmd :: (dec_fencei: Bool) :: Nil = dec0
-
-  val dec_illegal: Bool = !dec_val_inst && dec_reg_inst_valid //illegal instruction
-
+  inst.io.inst.bits  := dec_reg_inst
+  inst.io.inst.valid := dec_reg_inst_valid
+  val dec_illegal: Bool = inst.io.cinfo.illegal //illegal instruction
   // we need to stall IF while fencei goes through DEC and EXE, as there may
   // be a store we need to wait to clear in MEM.
   val exe_reg_fencei = RegInit(false.B)
-  fencei := (dec_fencei && dec_reg_inst_valid) || exe_reg_fencei
-
-  // immediates
-  val imm_itype  = dec_reg_inst(31,20)
-  val imm_stype  = Cat(dec_reg_inst(31,25), dec_reg_inst(11,7))
-  val imm_sbtype = Cat(dec_reg_inst(31), dec_reg_inst(7), dec_reg_inst(30, 25), dec_reg_inst(11,8))
-  val imm_utype  = dec_reg_inst(31, 12)
-  val imm_ujtype = Cat(dec_reg_inst(31), dec_reg_inst(19,12), dec_reg_inst(20), dec_reg_inst(30,21))
-  val imm_z = Cat(Fill(27,0.U), dec_reg_inst(19,15))
-
-  // sign-extend immediates
-  val imm_itype_sext  = Cat(Fill(20,imm_itype(11)), imm_itype)
-  val imm_stype_sext  = Cat(Fill(20,imm_stype(11)), imm_stype)
-  val imm_sbtype_sext = Cat(Fill(19,imm_sbtype(11)), imm_sbtype, 0.U)
-  val imm_utype_sext  = Cat(imm_utype, Fill(12,0.U))
-  val imm_ujtype_sext = Cat(Fill(11,imm_ujtype(19)), imm_ujtype, 0.U)
+  fencei := inst.io.cinfo.fencei || exe_reg_fencei
 
    // Bypass Muxes
   val exe_wbdata   = Wire(UInt(conf.xprlen.W))
@@ -311,8 +180,8 @@ class Core(implicit conf: CPUConfig) extends Module with BTBParams {
 
   // Register File
   val regfile = Module(new RegisterFile())
-  regfile.io.rs1_addr := dec_rs1_addr
-  regfile.io.rs2_addr := dec_rs2_addr
+  regfile.io.rs1_addr := inst.io.cinfo.rs1_addr
+  regfile.io.rs2_addr := inst.io.cinfo.rs2_addr
   val rf_rs1_data = regfile.io.rs1_data
   val rf_rs2_data = regfile.io.rs2_data
   regfile.io.waddr := wb_reg_wbaddr
@@ -321,23 +190,23 @@ class Core(implicit conf: CPUConfig) extends Module with BTBParams {
 
   // roll the OP1 mux into the bypass mux logic
   dec_op1_data := MuxCase(rf_rs1_data, Array(
-                       (dec_op1_sel === OP1_IMZ) -> imm_z,
-                       (dec_op1_sel === OP1_PC) -> dec_reg_pc,
-                       ((exe_reg_wbaddr === dec_rs1_addr) && (dec_rs1_addr =/= 0.U) && exe_reg_rf_wen) -> exe_wbdata,
-                       ((mem_reg_wbaddr === dec_rs1_addr) && (dec_rs1_addr =/= 0.U) && mem_reg_rf_wen) -> mem_wbdata,
-                       ((wb_reg_wbaddr  === dec_rs1_addr) && (dec_rs1_addr =/= 0.U) &&  wb_reg_rf_wen) -> wb_reg_wbdata))
+                       (inst.io.cinfo.op1_sel === OP1_IMZ)-> inst.io.dinfo.imm_z,
+                       (inst.io.cinfo.op1_sel === OP1_PC) -> dec_reg_pc,
+                       ((exe_reg_wbaddr === inst.io.cinfo.rs1_addr) && (inst.io.cinfo.rs1_addr =/= 0.U) && exe_reg_rf_wen) -> exe_wbdata,
+                       ((mem_reg_wbaddr === inst.io.cinfo.rs1_addr) && (inst.io.cinfo.rs1_addr =/= 0.U) && mem_reg_rf_wen) -> mem_wbdata,
+                       ((wb_reg_wbaddr  === inst.io.cinfo.rs1_addr) && (inst.io.cinfo.rs1_addr =/= 0.U) &&  wb_reg_rf_wen) -> wb_reg_wbdata))
 
   dec_rs2_data := MuxCase(rf_rs2_data, Array(
-                       ((exe_reg_wbaddr === dec_rs2_addr) && (dec_rs2_addr =/= 0.U) && exe_reg_rf_wen) -> exe_wbdata,
-                       ((mem_reg_wbaddr === dec_rs2_addr) && (dec_rs2_addr =/= 0.U) && mem_reg_rf_wen) -> mem_wbdata,
-                       ((wb_reg_wbaddr  === dec_rs2_addr) && (dec_rs2_addr =/= 0.U) &&  wb_reg_rf_wen) -> wb_reg_wbdata))
+                       ((exe_reg_wbaddr === inst.io.cinfo.rs2_addr) && (inst.io.cinfo.rs2_addr =/= 0.U) && exe_reg_rf_wen) -> exe_wbdata,
+                       ((mem_reg_wbaddr === inst.io.cinfo.rs2_addr) && (inst.io.cinfo.rs2_addr =/= 0.U) && mem_reg_rf_wen) -> mem_wbdata,
+                       ((wb_reg_wbaddr  === inst.io.cinfo.rs2_addr) && (inst.io.cinfo.rs2_addr =/= 0.U) &&  wb_reg_rf_wen) -> wb_reg_wbdata))
 
   dec_op2_data := MuxCase(dec_rs2_data, Array(
-                       (dec_op2_sel === OP2_ITYPE)  -> imm_itype_sext,
-                       (dec_op2_sel === OP2_STYPE)  -> imm_stype_sext,
-                       (dec_op2_sel === OP2_SBTYPE) -> imm_sbtype_sext,
-                       (dec_op2_sel === OP2_UTYPE)  -> imm_utype_sext,
-                       (dec_op2_sel === OP2_UJTYPE) -> imm_ujtype_sext))
+                       (inst.io.cinfo.op2_sel === OP2_ITYPE)  -> inst.io.dinfo.imm_i,
+                       (inst.io.cinfo.op2_sel === OP2_STYPE)  -> inst.io.dinfo.imm_s,
+                       (inst.io.cinfo.op2_sel === OP2_SBTYPE) -> inst.io.dinfo.imm_sb,
+                       (inst.io.cinfo.op2_sel === OP2_UTYPE)  -> inst.io.dinfo.imm_u,
+                       (inst.io.cinfo.op2_sel === OP2_UJTYPE) -> inst.io.dinfo.imm_uj))
 
 
   val exe_reg_mem_en   = RegInit(false.B)
@@ -366,16 +235,16 @@ class Core(implicit conf: CPUConfig) extends Module with BTBParams {
   }
 
   def forward_dec_exe = {
-    exe_reg_rf_wen   := dec_rf_wen // FIXME: inorder to debug
-    exe_reg_mem_en   := dec_mem_en
+    exe_reg_rf_wen   := inst.io.cinfo.rf_wen // FIXME: inorder to debug
+    exe_reg_mem_en   := inst.io.cinfo.mem_en
     // convert CSR instructions with raddr1 == 0 to read-only CSR commands
-    exe_reg_csr_cmd  := Mux((dec_csr_cmd === CSR.S || dec_csr_cmd === CSR.C) && dec_rs1_addr === 0.U, CSR.R, dec_csr_cmd)
-    exe_reg_is_csr   := dec_csr_cmd =/= CSR.N && dec_csr_cmd =/= CSR.I
-    exe_reg_illegal  := dec_illegal
-    exe_reg_br_type  := dec_br_type
+    exe_reg_csr_cmd  := Mux((inst.io.cinfo.csr_cmd === CSR.S || inst.io.cinfo.csr_cmd === CSR.C) && inst.io.cinfo.rs1_addr === 0.U, CSR.R, inst.io.cinfo.csr_cmd)
+    exe_reg_is_csr   := inst.io.cinfo.csr_cmd =/= CSR.N && inst.io.cinfo.csr_cmd =/= CSR.I
+    exe_reg_illegal  := inst.io.cinfo.illegal
+    exe_reg_br_type  := inst.io.cinfo.br_type
     exe_reg_inst_valid := true.B
     exe_reg_inst     := dec_reg_inst
-    exe_reg_fencei   := dec_fencei
+    exe_reg_fencei   := inst.io.cinfo.fencei
   }
 
   when ((dec_stall && !mem_stall) || xcpt) {
@@ -392,13 +261,13 @@ class Core(implicit conf: CPUConfig) extends Module with BTBParams {
     exe_reg_op2_data      := dec_op2_data
     exe_reg_rs2_data      := dec_rs2_data
     // exe_reg_op2_sel       := dec_op2_sel
-    exe_reg_alu_fun       := dec_alu_fun
+    exe_reg_alu_fun       := inst.io.cinfo.alu_fun
     // exe_reg_rf_wen
-    exe_reg_wb_sel        := dec_wb_sel
-    exe_reg_wbaddr        := dec_wbaddr
+    exe_reg_wb_sel        := inst.io.cinfo.wb_sel
+    exe_reg_wbaddr        := inst.io.cinfo.wbaddr
     // exe_reg_mem_en
-    exe_reg_mem_fcn       := dec_mem_fcn
-    exe_reg_mem_typ       := dec_mem_typ
+    exe_reg_mem_fcn       := inst.io.cinfo.mem_fcn
+    exe_reg_mem_typ       := inst.io.cinfo.mem_typ
     // exe_reg_csr_cmd
   }
 
@@ -546,8 +415,8 @@ class Core(implicit conf: CPUConfig) extends Module with BTBParams {
   //control pipeline signals
   val exe_inst_is_load: Bool = exe_reg_mem_en && (exe_reg_mem_fcn === M_XRD)
 
-  dec_stall := ((exe_inst_is_load && exe_reg_wbaddr === dec_rs1_addr && exe_reg_wbaddr =/= 0.U && dec_rs1_oen) ||
-                (exe_inst_is_load && exe_reg_wbaddr === dec_rs2_addr && exe_reg_wbaddr =/= 0.U && dec_rs2_oen)) &&
+  dec_stall := ((exe_inst_is_load && exe_reg_wbaddr === inst.io.cinfo.rs1_addr && exe_reg_wbaddr =/= 0.U && inst.io.cinfo.rs1_oen) ||
+                (exe_inst_is_load && exe_reg_wbaddr === inst.io.cinfo.rs2_addr && exe_reg_wbaddr =/= 0.U && inst.io.cinfo.rs2_oen)) &&
                 dec_reg_inst_valid || exe_reg_is_csr
 
   // stall(mem_stall) full pipeline on no response from memory

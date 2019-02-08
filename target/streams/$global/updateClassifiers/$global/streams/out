@@ -5077,111 +5077,94 @@
 [debug] 	[NOT REQUIRED] com.thoughtworks.paranamer#paranamer;2.8!paranamer.jar(src)
 [debug] 	[NOT REQUIRED] org.json4s#json4s-core_2.11;3.5.3!json4s-core_2.11.jar(src)
 [debug] 	[NOT REQUIRED] org.json4s#json4s-ast_2.11;3.5.3!json4s-ast_2.11.jar(src)
+[debug] 	[NOT REQUIRED] edu.berkeley.cs#firrtl_2.11;1.1.6!firrtl_2.11.jar(src)
 [debug] 	[NOT REQUIRED] org.scalacheck#scalacheck_2.11;1.13.4!scalacheck_2.11.jar(src)
 [debug] no default ivy user dir defined: set to /home/albert/.ivy2
-[debug] no default ivy user dir defined: set to /home/albert/.ivy2
-[debug] no default ivy user dir defined: set to /home/albert/.ivy2
-[debug] no default ivy user dir defined: set to /home/albert/.ivy2
-[debug] 	[NOT REQUIRED] edu.berkeley.cs#firrtl_2.11;1.1.6!firrtl_2.11.jar(src)
-[debug] no default ivy user dir defined: set to /home/albert/.ivy2
 [debug] 	[NOT REQUIRED] org.fusesource.jansi#jansi;1.11!jansi.jar(src)
-[debug] including url: jar:file:/home/albert/.sbt/boot/scala-2.12.7/org.scala-sbt/sbt/1.2.7/ivy-2.3.0-sbt-b18f59ea3bc914a297bb6f1a4f7fb0ace399e310.jar!/org/apache/ivy/core/settings/ivysettings-public.xml
-[debug] including url: jar:file:/home/albert/.sbt/boot/scala-2.12.7/org.scala-sbt/sbt/1.2.7/ivy-2.3.0-sbt-b18f59ea3bc914a297bb6f1a4f7fb0ace399e310.jar!/org/apache/ivy/core/settings/ivysettings-public.xml
-[debug] including url: jar:file:/home/albert/.sbt/boot/scala-2.12.7/org.scala-sbt/sbt/1.2.7/ivy-2.3.0-sbt-b18f59ea3bc914a297bb6f1a4f7fb0ace399e310.jar!/org/apache/ivy/core/settings/ivysettings-public.xml
+[debug] no default ivy user dir defined: set to /home/albert/.ivy2
+[debug] no default ivy user dir defined: set to /home/albert/.ivy2
+[debug] no default ivy user dir defined: set to /home/albert/.ivy2
+[debug] no default ivy user dir defined: set to /home/albert/.ivy2
 [debug] no default ivy user dir defined: set to /home/albert/.ivy2
 [debug] including url: jar:file:/home/albert/.sbt/boot/scala-2.12.7/org.scala-sbt/sbt/1.2.7/ivy-2.3.0-sbt-b18f59ea3bc914a297bb6f1a4f7fb0ace399e310.jar!/org/apache/ivy/core/settings/ivysettings-public.xml
 [debug] including url: jar:file:/home/albert/.sbt/boot/scala-2.12.7/org.scala-sbt/sbt/1.2.7/ivy-2.3.0-sbt-b18f59ea3bc914a297bb6f1a4f7fb0ace399e310.jar!/org/apache/ivy/core/settings/ivysettings-public.xml
-[debug] no default cache defined: set to /home/albert/.ivy2/cache
-[debug] no default cache defined: set to /home/albert/.ivy2/cache
-[debug] no default cache defined: set to /home/albert/.ivy2/cache
-[debug] including url: jar:file:/home/albert/.sbt/boot/scala-2.12.7/org.scala-sbt/sbt/1.2.7/ivy-2.3.0-sbt-b18f59ea3bc914a297bb6f1a4f7fb0ace399e310.jar!/org/apache/ivy/core/settings/ivysettings-shared.xml
-[debug] including url: jar:file:/home/albert/.sbt/boot/scala-2.12.7/org.scala-sbt/sbt/1.2.7/ivy-2.3.0-sbt-b18f59ea3bc914a297bb6f1a4f7fb0ace399e310.jar!/org/apache/ivy/core/settings/ivysettings-shared.xml
-[debug] including url: jar:file:/home/albert/.sbt/boot/scala-2.12.7/org.scala-sbt/sbt/1.2.7/ivy-2.3.0-sbt-b18f59ea3bc914a297bb6f1a4f7fb0ace399e310.jar!/org/apache/ivy/core/settings/ivysettings-shared.xml
-[debug] no default cache defined: set to /home/albert/.ivy2/cache
-[debug] including url: jar:file:/home/albert/.sbt/boot/scala-2.12.7/org.scala-sbt/sbt/1.2.7/ivy-2.3.0-sbt-b18f59ea3bc914a297bb6f1a4f7fb0ace399e310.jar!/org/apache/ivy/core/settings/ivysettings-shared.xml
-[debug] no default cache defined: set to /home/albert/.ivy2/cache
 [debug] including url: jar:file:/home/albert/.sbt/boot/scala-2.12.7/org.scala-sbt/sbt/1.2.7/ivy-2.3.0-sbt-b18f59ea3bc914a297bb6f1a4f7fb0ace399e310.jar!/org/apache/ivy/core/settings/ivysettings-public.xml
-[debug] including url: jar:file:/home/albert/.sbt/boot/scala-2.12.7/org.scala-sbt/sbt/1.2.7/ivy-2.3.0-sbt-b18f59ea3bc914a297bb6f1a4f7fb0ace399e310.jar!/org/apache/ivy/core/settings/ivysettings-shared.xml
-[debug] including url: jar:file:/home/albert/.sbt/boot/scala-2.12.7/org.scala-sbt/sbt/1.2.7/ivy-2.3.0-sbt-b18f59ea3bc914a297bb6f1a4f7fb0ace399e310.jar!/org/apache/ivy/core/settings/ivysettings-local.xml
-[debug] including url: jar:file:/home/albert/.sbt/boot/scala-2.12.7/org.scala-sbt/sbt/1.2.7/ivy-2.3.0-sbt-b18f59ea3bc914a297bb6f1a4f7fb0ace399e310.jar!/org/apache/ivy/core/settings/ivysettings-local.xml
-[debug] including url: jar:file:/home/albert/.sbt/boot/scala-2.12.7/org.scala-sbt/sbt/1.2.7/ivy-2.3.0-sbt-b18f59ea3bc914a297bb6f1a4f7fb0ace399e310.jar!/org/apache/ivy/core/settings/ivysettings-local.xml
-[debug] including url: jar:file:/home/albert/.sbt/boot/scala-2.12.7/org.scala-sbt/sbt/1.2.7/ivy-2.3.0-sbt-b18f59ea3bc914a297bb6f1a4f7fb0ace399e310.jar!/org/apache/ivy/core/settings/ivysettings-local.xml
+[debug] including url: jar:file:/home/albert/.sbt/boot/scala-2.12.7/org.scala-sbt/sbt/1.2.7/ivy-2.3.0-sbt-b18f59ea3bc914a297bb6f1a4f7fb0ace399e310.jar!/org/apache/ivy/core/settings/ivysettings-public.xml
+[debug] including url: jar:file:/home/albert/.sbt/boot/scala-2.12.7/org.scala-sbt/sbt/1.2.7/ivy-2.3.0-sbt-b18f59ea3bc914a297bb6f1a4f7fb0ace399e310.jar!/org/apache/ivy/core/settings/ivysettings-public.xml
+[debug] including url: jar:file:/home/albert/.sbt/boot/scala-2.12.7/org.scala-sbt/sbt/1.2.7/ivy-2.3.0-sbt-b18f59ea3bc914a297bb6f1a4f7fb0ace399e310.jar!/org/apache/ivy/core/settings/ivysettings-public.xml
+[debug] no default cache defined: set to /home/albert/.ivy2/cache
+[debug] no default cache defined: set to /home/albert/.ivy2/cache
 [debug] no default cache defined: set to /home/albert/.ivy2/cache
 [debug] including url: jar:file:/home/albert/.sbt/boot/scala-2.12.7/org.scala-sbt/sbt/1.2.7/ivy-2.3.0-sbt-b18f59ea3bc914a297bb6f1a4f7fb0ace399e310.jar!/org/apache/ivy/core/settings/ivysettings-shared.xml
-[debug] including url: jar:file:/home/albert/.sbt/boot/scala-2.12.7/org.scala-sbt/sbt/1.2.7/ivy-2.3.0-sbt-b18f59ea3bc914a297bb6f1a4f7fb0ace399e310.jar!/org/apache/ivy/core/settings/ivysettings-main-chain.xml
-[debug] including url: jar:file:/home/albert/.sbt/boot/scala-2.12.7/org.scala-sbt/sbt/1.2.7/ivy-2.3.0-sbt-b18f59ea3bc914a297bb6f1a4f7fb0ace399e310.jar!/org/apache/ivy/core/settings/ivysettings-main-chain.xml
-[debug] including url: jar:file:/home/albert/.sbt/boot/scala-2.12.7/org.scala-sbt/sbt/1.2.7/ivy-2.3.0-sbt-b18f59ea3bc914a297bb6f1a4f7fb0ace399e310.jar!/org/apache/ivy/core/settings/ivysettings-main-chain.xml
+[debug] including url: jar:file:/home/albert/.sbt/boot/scala-2.12.7/org.scala-sbt/sbt/1.2.7/ivy-2.3.0-sbt-b18f59ea3bc914a297bb6f1a4f7fb0ace399e310.jar!/org/apache/ivy/core/settings/ivysettings-shared.xml
+[debug] including url: jar:file:/home/albert/.sbt/boot/scala-2.12.7/org.scala-sbt/sbt/1.2.7/ivy-2.3.0-sbt-b18f59ea3bc914a297bb6f1a4f7fb0ace399e310.jar!/org/apache/ivy/core/settings/ivysettings-shared.xml
+[debug] no default cache defined: set to /home/albert/.ivy2/cache
+[debug] no default cache defined: set to /home/albert/.ivy2/cache
+[debug] including url: jar:file:/home/albert/.sbt/boot/scala-2.12.7/org.scala-sbt/sbt/1.2.7/ivy-2.3.0-sbt-b18f59ea3bc914a297bb6f1a4f7fb0ace399e310.jar!/org/apache/ivy/core/settings/ivysettings-shared.xml
+[debug] including url: jar:file:/home/albert/.sbt/boot/scala-2.12.7/org.scala-sbt/sbt/1.2.7/ivy-2.3.0-sbt-b18f59ea3bc914a297bb6f1a4f7fb0ace399e310.jar!/org/apache/ivy/core/settings/ivysettings-shared.xml
+[debug] no default cache defined: set to /home/albert/.ivy2/cache
+[debug] including url: jar:file:/home/albert/.sbt/boot/scala-2.12.7/org.scala-sbt/sbt/1.2.7/ivy-2.3.0-sbt-b18f59ea3bc914a297bb6f1a4f7fb0ace399e310.jar!/org/apache/ivy/core/settings/ivysettings-shared.xml
 [debug] including url: jar:file:/home/albert/.sbt/boot/scala-2.12.7/org.scala-sbt/sbt/1.2.7/ivy-2.3.0-sbt-b18f59ea3bc914a297bb6f1a4f7fb0ace399e310.jar!/org/apache/ivy/core/settings/ivysettings-local.xml
+[debug] including url: jar:file:/home/albert/.sbt/boot/scala-2.12.7/org.scala-sbt/sbt/1.2.7/ivy-2.3.0-sbt-b18f59ea3bc914a297bb6f1a4f7fb0ace399e310.jar!/org/apache/ivy/core/settings/ivysettings-local.xml
+[debug] including url: jar:file:/home/albert/.sbt/boot/scala-2.12.7/org.scala-sbt/sbt/1.2.7/ivy-2.3.0-sbt-b18f59ea3bc914a297bb6f1a4f7fb0ace399e310.jar!/org/apache/ivy/core/settings/ivysettings-local.xml
+[debug] including url: jar:file:/home/albert/.sbt/boot/scala-2.12.7/org.scala-sbt/sbt/1.2.7/ivy-2.3.0-sbt-b18f59ea3bc914a297bb6f1a4f7fb0ace399e310.jar!/org/apache/ivy/core/settings/ivysettings-local.xml
+[debug] including url: jar:file:/home/albert/.sbt/boot/scala-2.12.7/org.scala-sbt/sbt/1.2.7/ivy-2.3.0-sbt-b18f59ea3bc914a297bb6f1a4f7fb0ace399e310.jar!/org/apache/ivy/core/settings/ivysettings-local.xml
+[debug] including url: jar:file:/home/albert/.sbt/boot/scala-2.12.7/org.scala-sbt/sbt/1.2.7/ivy-2.3.0-sbt-b18f59ea3bc914a297bb6f1a4f7fb0ace399e310.jar!/org/apache/ivy/core/settings/ivysettings-local.xml
+[debug] including url: jar:file:/home/albert/.sbt/boot/scala-2.12.7/org.scala-sbt/sbt/1.2.7/ivy-2.3.0-sbt-b18f59ea3bc914a297bb6f1a4f7fb0ace399e310.jar!/org/apache/ivy/core/settings/ivysettings-main-chain.xml
+[debug] including url: jar:file:/home/albert/.sbt/boot/scala-2.12.7/org.scala-sbt/sbt/1.2.7/ivy-2.3.0-sbt-b18f59ea3bc914a297bb6f1a4f7fb0ace399e310.jar!/org/apache/ivy/core/settings/ivysettings-main-chain.xml
 [debug] including url: jar:file:/home/albert/.sbt/boot/scala-2.12.7/org.scala-sbt/sbt/1.2.7/ivy-2.3.0-sbt-b18f59ea3bc914a297bb6f1a4f7fb0ace399e310.jar!/org/apache/ivy/core/settings/ivysettings-main-chain.xml
 [debug] including url: jar:file:/home/albert/.sbt/boot/scala-2.12.7/org.scala-sbt/sbt/1.2.7/ivy-2.3.0-sbt-b18f59ea3bc914a297bb6f1a4f7fb0ace399e310.jar!/org/apache/ivy/core/settings/ivysettings-default-chain.xml
+[debug] including url: jar:file:/home/albert/.sbt/boot/scala-2.12.7/org.scala-sbt/sbt/1.2.7/ivy-2.3.0-sbt-b18f59ea3bc914a297bb6f1a4f7fb0ace399e310.jar!/org/apache/ivy/core/settings/ivysettings-default-chain.xml
+[debug] including url: jar:file:/home/albert/.sbt/boot/scala-2.12.7/org.scala-sbt/sbt/1.2.7/ivy-2.3.0-sbt-b18f59ea3bc914a297bb6f1a4f7fb0ace399e310.jar!/org/apache/ivy/core/settings/ivysettings-default-chain.xml
 [debug] including url: jar:file:/home/albert/.sbt/boot/scala-2.12.7/org.scala-sbt/sbt/1.2.7/ivy-2.3.0-sbt-b18f59ea3bc914a297bb6f1a4f7fb0ace399e310.jar!/org/apache/ivy/core/settings/ivysettings-main-chain.xml
-[debug] including url: jar:file:/home/albert/.sbt/boot/scala-2.12.7/org.scala-sbt/sbt/1.2.7/ivy-2.3.0-sbt-b18f59ea3bc914a297bb6f1a4f7fb0ace399e310.jar!/org/apache/ivy/core/settings/ivysettings-local.xml
-[debug] settings loaded (54ms)
+[debug] settings loaded (48ms)
 [debug] 	default cache: /home/albert/.ivy2/cache
 [debug] 	default resolver: default
 [debug] 	-- 5 resolvers:
 [debug] 	shared [file]
 [debug] 	default [chain] [local, main]
-[debug] including url: jar:file:/home/albert/.sbt/boot/scala-2.12.7/org.scala-sbt/sbt/1.2.7/ivy-2.3.0-sbt-b18f59ea3bc914a297bb6f1a4f7fb0ace399e310.jar!/org/apache/ivy/core/settings/ivysettings-default-chain.xml
-[debug] 	public [ibiblio]
-[debug] 	main [chain] [shared, public]
-[debug] 	local [file]
-[debug] settings loaded (49ms)
-[debug] 	default cache: /home/albert/.ivy2/cache
-[debug] 	default resolver: default
-[debug] 	-- 5 resolvers:
-[debug] 	shared [file]
-[debug] 	default [chain] [local, main]
 [debug] 	public [ibiblio]
 [debug] 	main [chain] [shared, public]
 [debug] 	local [file]
 [debug] including url: jar:file:/home/albert/.sbt/boot/scala-2.12.7/org.scala-sbt/sbt/1.2.7/ivy-2.3.0-sbt-b18f59ea3bc914a297bb6f1a4f7fb0ace399e310.jar!/org/apache/ivy/core/settings/ivysettings-main-chain.xml
+[debug] including url: jar:file:/home/albert/.sbt/boot/scala-2.12.7/org.scala-sbt/sbt/1.2.7/ivy-2.3.0-sbt-b18f59ea3bc914a297bb6f1a4f7fb0ace399e310.jar!/org/apache/ivy/core/settings/ivysettings-default-chain.xml
+[debug] including url: jar:file:/home/albert/.sbt/boot/scala-2.12.7/org.scala-sbt/sbt/1.2.7/ivy-2.3.0-sbt-b18f59ea3bc914a297bb6f1a4f7fb0ace399e310.jar!/org/apache/ivy/core/settings/ivysettings-main-chain.xml
+[debug] including url: jar:file:/home/albert/.sbt/boot/scala-2.12.7/org.scala-sbt/sbt/1.2.7/ivy-2.3.0-sbt-b18f59ea3bc914a297bb6f1a4f7fb0ace399e310.jar!/org/apache/ivy/core/settings/ivysettings-default-chain.xml
 [debug] 	[NOT REQUIRED] org.antlr#antlr4-runtime;4.7.1!antlr4-runtime.jar(src)
-[debug] including url: jar:file:/home/albert/.sbt/boot/scala-2.12.7/org.scala-sbt/sbt/1.2.7/ivy-2.3.0-sbt-b18f59ea3bc914a297bb6f1a4f7fb0ace399e310.jar!/org/apache/ivy/core/settings/ivysettings-default-chain.xml
-[debug] including url: jar:file:/home/albert/.sbt/boot/scala-2.12.7/org.scala-sbt/sbt/1.2.7/ivy-2.3.0-sbt-b18f59ea3bc914a297bb6f1a4f7fb0ace399e310.jar!/org/apache/ivy/core/settings/ivysettings-default-chain.xml
+[debug] settings loaded (50ms)
+[debug] 	default cache: /home/albert/.ivy2/cache
+[debug] 	default resolver: default
+[debug] 	-- 5 resolvers:
+[debug] 	shared [file]
+[debug] 	default [chain] [local, main]
+[debug] 	public [ibiblio]
+[debug] 	main [chain] [shared, public]
+[debug] 	local [file]
+[debug] settings loaded (50ms)
+[debug] 	default cache: /home/albert/.ivy2/cache
+[debug] 	default resolver: default
+[debug] 	-- 5 resolvers:
+[debug] 	shared [file]
+[debug] 	default [chain] [local, main]
+[debug] 	public [ibiblio]
+[debug] 	main [chain] [shared, public]
+[debug] 	local [file]
 [debug] 	[NOT REQUIRED] edu.berkeley.cs#chisel3_2.11;3.1.6!chisel3_2.11.jar(src)
-[debug] including url: jar:file:/home/albert/.sbt/boot/scala-2.12.7/org.scala-sbt/sbt/1.2.7/ivy-2.3.0-sbt-b18f59ea3bc914a297bb6f1a4f7fb0ace399e310.jar!/org/apache/ivy/core/settings/ivysettings-default-chain.xml
 [debug] 	[NOT REQUIRED] com.github.scopt#scopt_2.11;3.7.0!scopt_2.11.jar(src)
 [debug] 	[NOT REQUIRED] org.scala-lang.modules#scala-parser-combinators_2.11;1.0.4!scala-parser-combinators_2.11.jar(src)
-[debug] settings loaded (64ms)
-[debug] 	default cache: /home/albert/.ivy2/cache
-[debug] 	default resolver: default
-[debug] 	-- 5 resolvers:
-[debug] 	shared [file]
-[debug] 	default [chain] [local, main]
-[debug] 	public [ibiblio]
-[debug] 	main [chain] [shared, public]
-[debug] 	local [file]
-[debug] including url: jar:file:/home/albert/.sbt/boot/scala-2.12.7/org.scala-sbt/sbt/1.2.7/ivy-2.3.0-sbt-b18f59ea3bc914a297bb6f1a4f7fb0ace399e310.jar!/org/apache/ivy/core/settings/ivysettings-default-chain.xml
 [debug] 	[NOT REQUIRED] org.glassfish#javax.json;1.0.4!javax.json.jar(src)
-[debug] 	[NOT REQUIRED] org.scala-lang.modules#scala-xml_2.11;1.0.6!scala-xml_2.11.jar(src)
 [debug] 	[NOT REQUIRED] org.scala-lang#scala-reflect;2.11.12!scala-reflect.jar(src)
-[debug] 	[NOT REQUIRED] net.jcazevedo#moultingyaml_2.11;0.4.0!moultingyaml_2.11.jar(src)
+[debug] 	[NOT REQUIRED] org.scala-lang.modules#scala-xml_2.11;1.0.6!scala-xml_2.11.jar(src)
 [debug] 	[NOT REQUIRED] org.scala-lang.modules#scala-jline;2.12.1!scala-jline.jar(src)
-[debug] settings loaded (66ms)
-[debug] 	default cache: /home/albert/.ivy2/cache
-[debug] 	default resolver: default
-[debug] 	-- 5 resolvers:
-[debug] 	shared [file]
-[debug] 	default [chain] [local, main]
-[debug] 	public [ibiblio]
-[debug] settings loaded (60ms)
-[debug] 	main [chain] [shared, public]
-[debug] 	default cache: /home/albert/.ivy2/cache
-[debug] 	local [file]
-[debug] 	default resolver: default
-[debug] 	-- 5 resolvers:
-[debug] 	shared [file]
-[debug] 	default [chain] [local, main]
-[debug] 	public [ibiblio]
-[debug] 	main [chain] [shared, public]
-[debug] 	local [file]
+[debug] 	[NOT REQUIRED] net.jcazevedo#moultingyaml_2.11;0.4.0!moultingyaml_2.11.jar(src)
 [debug] 	[NOT REQUIRED] ch.qos.logback#logback-classic;1.2.3!logback-classic.jar(src)
+[debug] 	[NOT REQUIRED] joda-time#joda-time;2.9.4!joda-time.jar(src)
 [debug] 	[NOT REQUIRED] org.slf4j#slf4j-api;1.7.25!slf4j-api.jar(src)
 [debug] 	[NOT REQUIRED] org.joda#joda-convert;1.2!joda-convert.jar(src)
+[debug] 	[NOT REQUIRED] com.typesafe.scala-logging#scala-logging_2.11;3.7.2!scala-logging_2.11.jar(src)
 [debug] 	[NOT REQUIRED] org.scalactic#scalactic_2.11;3.0.1!scalactic_2.11.jar(src)
 [debug] 	[NOT REQUIRED] edu.berkeley.cs#chisel-iotesters_2.11;1.2.8!chisel-iotesters_2.11.jar(src)
-[debug] settings loaded (49ms)
+[debug] settings loaded (57ms)
 [debug] 	default cache: /home/albert/.ivy2/cache
 [debug] 	default resolver: default
 [debug] 	-- 5 resolvers:
@@ -5196,21 +5179,38 @@
 [debug] 	[NOT REQUIRED] edu.berkeley.cs#treadle_2.11;1.0.4!treadle_2.11.jar(src)
 [debug] 	[NOT REQUIRED] org.scala-lang#scala-library;2.11.12!scala-library.jar(src)
 [debug] 	[NOT REQUIRED] org.json4s#json4s-native_2.11;3.5.3!json4s-native_2.11.jar(src)
+[debug] including url: jar:file:/home/albert/.sbt/boot/scala-2.12.7/org.scala-sbt/sbt/1.2.7/ivy-2.3.0-sbt-b18f59ea3bc914a297bb6f1a4f7fb0ace399e310.jar!/org/apache/ivy/core/settings/ivysettings-default-chain.xml
+[debug] 	[NOT REQUIRED] com.ibm.icu#icu4j;58.2!icu4j.jar(src)
 [debug] 	[NOT REQUIRED] org.antlr#antlr4;4.7.1!antlr4.jar(src)
-[debug] 	[NOT REQUIRED] com.typesafe.scala-logging#scala-logging_2.11;3.7.2!scala-logging_2.11.jar(src)
 [debug] 	[NOT REQUIRED] org.json4s#json4s-scalap_2.11;3.5.3!json4s-scalap_2.11.jar(src)
 [debug] 	[NOT REQUIRED] org.antlr#antlr-runtime;3.5.2!antlr-runtime.jar(src)
-[debug] 	[NOT REQUIRED] com.ibm.icu#icu4j;58.2!icu4j.jar(src)
-[debug] 	[NOT REQUIRED] org.yaml#snakeyaml;1.17!snakeyaml.jar(src)
 [debug] 	[NOT REQUIRED] org.scala-sbt#test-interface;1.0!test-interface.jar(src)
-[debug] 	[NOT REQUIRED] ch.qos.logback#logback-core;1.2.3!logback-core.jar(src)
+[debug] settings loaded (60ms)
+[debug] 	default cache: /home/albert/.ivy2/cache
+[debug] 	default resolver: default
+[debug] 	-- 5 resolvers:
+[debug] 	shared [file]
+[debug] 	default [chain] [local, main]
+[debug] 	public [ibiblio]
+[debug] 	main [chain] [shared, public]
+[debug] 	local [file]
+[debug] 	[NOT REQUIRED] org.yaml#snakeyaml;1.17!snakeyaml.jar(src)
+[debug] settings loaded (60ms)
+[debug] 	default cache: /home/albert/.ivy2/cache
+[debug] 	default resolver: default
+[debug] 	-- 5 resolvers:
+[debug] 	shared [file]
+[debug] 	default [chain] [local, main]
+[debug] 	public [ibiblio]
+[debug] 	main [chain] [shared, public]
+[debug] 	local [file]
 [debug] 	[NOT REQUIRED] org.scalatest#scalatest_2.11;3.0.1!scalatest_2.11.jar(src)
-[debug] 	[NOT REQUIRED] jline#jline;2.14.3!jline.jar(src)
 [debug] 	[NOT REQUIRED] org.scala-lang.modules#scala-xml_2.11;1.0.5!scala-xml_2.11.jar(src)
-[debug] 	[NOT REQUIRED] org.scala-lang#scala-compiler;2.11.12!scala-compiler.jar(src)
 [debug] 	[NOT REQUIRED] org.abego.treelayout#org.abego.treelayout.core;1.0.3!org.abego.treelayout.core.jar(src)
-[debug] 	[NOT REQUIRED] joda-time#joda-time;2.9.4!joda-time.jar(src)
-[debug] :: resolution report :: resolve 1322ms :: artifacts dl 90ms
+[debug] 	[NOT REQUIRED] jline#jline;2.14.3!jline.jar(src)
+[debug] 	[NOT REQUIRED] org.scala-lang#scala-compiler;2.11.12!scala-compiler.jar(src)
+[debug] 	[NOT REQUIRED] ch.qos.logback#logback-core;1.2.3!logback-core.jar(src)
+[debug] :: resolution report :: resolve 1116ms :: artifacts dl 78ms
 [debug] 	report for cn.ac.ucas#chiwen$sources;0.1 compile produced in /home/albert/CPU/chiwen/target/scala-2.11/resolution-cache/reports/cn.ac.ucas-chiwen$sources-compile.xml
 [debug] 	report for cn.ac.ucas#chiwen$sources;0.1 runtime produced in /home/albert/CPU/chiwen/target/scala-2.11/resolution-cache/reports/cn.ac.ucas-chiwen$sources-runtime.xml
 [debug] 	report for cn.ac.ucas#chiwen$sources;0.1 test produced in /home/albert/CPU/chiwen/target/scala-2.11/resolution-cache/reports/cn.ac.ucas-chiwen$sources-test.xml
@@ -5222,4 +5222,4 @@
 [debug] 	report for cn.ac.ucas#chiwen$sources;0.1 plugin produced in /home/albert/CPU/chiwen/target/scala-2.11/resolution-cache/reports/cn.ac.ucas-chiwen$sources-plugin.xml
 [debug] 	report for cn.ac.ucas#chiwen$sources;0.1 pom produced in /home/albert/CPU/chiwen/target/scala-2.11/resolution-cache/reports/cn.ac.ucas-chiwen$sources-pom.xml
 [debug] 	report for cn.ac.ucas#chiwen$sources;0.1 scala-tool produced in /home/albert/CPU/chiwen/target/scala-2.11/resolution-cache/reports/cn.ac.ucas-chiwen$sources-scala-tool.xml
-[debug] 	resolve done (1322ms resolve - 90ms download)
+[debug] 	resolve done (1116ms resolve - 78ms download)

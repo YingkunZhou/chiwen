@@ -4,6 +4,7 @@ case class CPUConfig()
 {
   val xprlen = 32
   val pcInc = 4
+  val nInst = pcInc >> 2
   val hasbrJPredictor = true
   val delayFechinst   = true
   val pcLSB = 2
