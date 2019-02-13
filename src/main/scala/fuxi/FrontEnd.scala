@@ -1,0 +1,5 @@
+package fuxi
+
+class FrontEnd {
+
+}

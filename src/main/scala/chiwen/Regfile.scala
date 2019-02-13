@@ -20,7 +20,7 @@ class RFileIo(implicit val conf: CPUConfig) extends Bundle()
    val wen      = Input(Bool())
 }
 
-class RegisterFile(implicit val conf: CPUConfig) extends Module
+class Regfile(implicit val conf: CPUConfig) extends Module
 {
    val io = IO(new RFileIo())
 
