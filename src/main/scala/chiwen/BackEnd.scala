@@ -63,6 +63,15 @@ class Exe(val nEntries : Int)(implicit conf: CPUConfig) extends Mem {
   val alu_fun  = UInt(ALU_X.getWidth.W)
 }
 
+object Pulse {
+  def apply(in: Bool, forward: Bool): Bool = {
+    val in_latch = RegInit(true.B)
+    when (forward) { in_latch := true.B
+    }.elsewhen(in) { in_latch := false.B}
+    in && in_latch
+  }
+}
+
 class BackEnd(implicit conf: CPUConfig) extends Module with BTBParams {
   val io = IO(new Bundle {
     val mem  = new MemPortIo(conf.xprlen)
@@ -193,13 +202,13 @@ class BackEnd(implicit conf: CPUConfig) extends Module with BTBParams {
 
   exe_wbdata := alu.io.alu_result
 
-  io.front.rasIO.pop := exe_wire.jump(Jump.pop).toBool
-  io.front.rasIO.push.valid := exe_wire.jump(Jump.push).toBool
+  io.front.rasIO.pop := Pulse(exe_wire.jump(Jump.pop).toBool, !stall(Stage.MEM))
+  io.front.rasIO.push.valid := Pulse(exe_wire.jump(Jump.push).toBool, !stall(Stage.MEM))
   io.front.rasIO.push.bits  := alu.io.target.conti
 
-  io.front.feedBack.sel.valid := exe_wire.btbTp =/= CFIType.invalid.U
+  io.front.feedBack.sel.valid := Pulse(exe_wire.btbTp =/= CFIType.invalid.U, !stall(Stage.MEM))
   io.front.feedBack.sel.bits  := exe.btb.Sel
-  io.front.feedBack.redirect  := alu.io.ctrl.pc_sel === PC_BRJMP || alu.io.ctrl.pc_sel === PC_JALR
+  io.front.feedBack.redirect  := Pulse(alu.io.ctrl.pc_sel === PC_BRJMP || alu.io.ctrl.pc_sel === PC_JALR, !stall(Stage.MEM))
   io.front.feedBack.pc        := exe.pc
   val fb_cfiType =
     Mux(exe_wire.branch,                                      CFIType.branch.U,
@@ -265,15 +274,15 @@ class BackEnd(implicit conf: CPUConfig) extends Module with BTBParams {
   csr.io.xcpt  := ma_load || ma_store || ma_jump || mem_wire.illegal
   csr.io.cause := MuxCase(0.U, Array(
     ma_jump    -> Causes.misaligned_fetch.U,
-    mem_wire.illegal -> Causes.illegal_instruction.U,
     ma_load    -> Causes.misaligned_load.U,
-    ma_store   -> Causes.misaligned_store.U
+    ma_store   -> Causes.misaligned_store.U,
+    mem_wire.illegal -> Causes.illegal_instruction.U
   ))
   csr.io.tval  := MuxCase(0.U, Array(
     ma_jump    -> mem_reg_jpnpc,
-    mem_wire.illegal -> mem.inst,
     ma_load    -> mem_reg_exe_out,
-    ma_store   -> mem_reg_exe_out
+    ma_store   -> mem_reg_exe_out,
+    mem_wire.illegal -> mem.inst
   ))
   xcpt.valid := ma_jump || ma_load || ma_store || mem_wire.illegal || csr.io.eret
   xcpt.bits  := csr.io.evec
@@ -294,9 +303,9 @@ class BackEnd(implicit conf: CPUConfig) extends Module with BTBParams {
     (mem.wb_sel === WB_CSR) -> csr.io.rw.rdata))
 
   when (stall(Stage.MEM) || xcpt.valid) {
-    wb_valid := false.B
+    wb_valid  := false.B
   } .otherwise {
-    wb_valid := mem_valid
+    wb_valid  := mem_valid
     wb.rf_wen := mem.rf_wen
     wb.wbaddr := mem.wbaddr
     wb_wbdata := mem_wbdata
@@ -317,15 +326,15 @@ class BackEnd(implicit conf: CPUConfig) extends Module with BTBParams {
 
   stall(Stage.DEC) :=
     (exe_load_inst && exe.wbaddr === dec.io.cinfo.rs1_addr && dec.io.cinfo.rs1_addr =/= 0.U && dec_wire.rs1_oen) ||
-    (exe_load_inst && exe.wbaddr === dec.io.cinfo.rs2_addr && dec.io.cinfo.rs1_addr =/= 0.U && dec_wire.rs2_oen) ||
+    (exe_load_inst && exe.wbaddr === dec.io.cinfo.rs2_addr && dec.io.cinfo.rs2_addr =/= 0.U && dec_wire.rs2_oen) ||
     exe_wire.csr_cmd =/= CSR.N
 
   stall(Stage.EXE) := false.B
   // stall(mem_stall) full pipeline on no response from memory
   stall(Stage.MEM) := mem_wire.mem_en && !io.mem.resp.valid
 
-  io.front.dec_kill := dec_mispredict
-  io.front.if_kill  := if_mispredict || io.front.dec_kill
+  io.front.dec_kill := Pulse(dec_mispredict, forward = !stall(Stage.MEM))
+  io.front.if_kill  := Pulse(if_mispredict || dec_mispredict, forward = !stall(Stage.MEM))
   io.front.xcpt     := xcpt
   io.front.forward  := !stall.asUInt.orR
 
@@ -348,6 +357,7 @@ class BackEnd(implicit conf: CPUConfig) extends Module with BTBParams {
     , Mux(csr.io.illegal, Str("X"), Str(" "))
     , Mux(xcpt.valid || !exe_valid, BUBBLE, exe.inst)
   )
+
   if (conf.verbose) {
     when (io.cyc > 16427.U && io.cyc < 16475.U) {
       printf(p"Debug: target = ${Hexadecimal(io.front.feedBack.target)} dec_kill = ${io.front.dec_kill}\n")

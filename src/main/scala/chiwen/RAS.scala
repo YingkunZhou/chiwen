@@ -5,8 +5,8 @@ import chisel3.util.{Valid, log2Ceil}
 import common.CPUConfig
 
 class RasIO(val addr_width: Int) extends Bundle {
-  val push = Input(new Valid(UInt(addr_width.W)))
-  val pop  = Input(Bool())
+  val push = Input(new Valid(UInt(addr_width.W))) //push.valid critical
+  val pop  = Input(Bool()) //critical
   val peek = Output(UInt(addr_width.W))
 }
 

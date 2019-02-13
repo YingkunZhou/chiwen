@@ -4,15 +4,6 @@ import chisel3._
 import chisel3.util._
 import common.{CPUConfig, Str}
 
-object Pulse {
-  def apply(in: Bool, forward: Bool): Bool = {
-    val in_latch = RegInit(true.B)
-    when (in && !forward) { in_latch := false.B
-    }.elsewhen(forward) {in_latch := true.B }
-    in && in_latch
-  }
-}
-
 object LatchData {
   def apply(valid: Bool, data: UInt): UInt = {
     val data_latch = Reg(UInt())
@@ -36,9 +27,6 @@ class FetchInst(implicit conf: CPUConfig) extends Module with BTBParams {
     val inst       = Output(Valid(UInt(conf.xprlen.W)))
     val dec_pc     = Output(UInt(conf.xprlen.W))
   })
-
-  val if_kill:  Bool = Pulse(io.if_kill, io.forward)
-  val dec_kill: Bool = Pulse(io.dec_kill, io.forward)
 
   val sWtAddrOK :: sWtInstOK :: sWtForward :: Nil = Enum(3)
   val state = RegInit(sWtAddrOK)
@@ -72,16 +60,16 @@ class FetchInst(implicit conf: CPUConfig) extends Module with BTBParams {
     }
     is (sWtInstOK) {
       when (inst.valid) {
-        when (dec_kill)         { state := sWtAddrOK
-        }.elsewhen(inst_kill ||
-          io.forward)           { state := Mux(!addr_ready || if_kill, sWtAddrOK, sWtInstOK)
+        when (io.dec_kill)      { state := sWtAddrOK
+        }.elsewhen(inst_kill
+          || io.forward)        { state := Mux(!addr_ready || io.if_kill, sWtAddrOK, sWtInstOK)
         }.otherwise             { state := sWtForward
         }
       }
     }
     is (sWtForward) {
-      when (dec_kill)           { state := sWtAddrOK
-      }.elsewhen(io.forward)    { state := Mux(!addr_ready || if_kill, sWtAddrOK, sWtInstOK)
+      when (io.dec_kill)        { state := sWtAddrOK
+      }.elsewhen(io.forward)    { state := Mux(!addr_ready || io.if_kill, sWtAddrOK, sWtInstOK)
       }
     }
   }
@@ -92,24 +80,24 @@ class FetchInst(implicit conf: CPUConfig) extends Module with BTBParams {
   val pc_kill: Bool = RegInit(false.B)
   when(state === sWtAddrOK) {
     when(addr_ready)    { pc_kill := false.B
-    }.elsewhen(if_kill) { pc_kill := true.B }
+    }.elsewhen(io.if_kill) { pc_kill := true.B }
   }
 
   pc := Mux(pc_kill, kill_pc, io.pc)
   /*========================pc part============================*/
-  io.pc_forward := if_kill || addr_ready && (
+  io.pc_forward := io.if_kill || addr_ready && (
     (state === sWtAddrOK  && !pc_kill)   ||
     (state === sWtInstOK  && inst.valid  && (io.forward || inst_kill)) ||
     (state === sWtForward && io.forward)
   )
 
-  pc_valid := !if_kill && (
+  pc_valid := !io.if_kill && (
     (state === sWtInstOK  && inst.valid   && (io.forward || inst_kill)) ||
     (state === sWtForward && io.forward)) ||
      state === sWtAddrOK
 
   io.inst.valid := ((state === sWtInstOK && inst.valid && !inst_kill) ||
-                     state === sWtForward) && !dec_kill
+                     state === sWtForward) && !io.dec_kill
   io.inst.bits := LatchData(inst.valid, inst.bits)
 
   val reg_pred = Reg(new Predict(conf.xprlen))

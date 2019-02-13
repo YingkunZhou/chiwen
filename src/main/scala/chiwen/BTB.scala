@@ -23,11 +23,11 @@ object CFIType {
 }
 
 class FeedBack(val addr_width: Int) extends Bundle with BTBParams {
-  val redirect = Bool()
+  val redirect = Bool()             //critical
+  val sel      = new Valid(UInt(log2Ceil(nEntries).W)) //sel.valid critical
   val pc       = UInt(addr_width.W)
   val target   = UInt(addr_width.W)
   val cfiType  = UInt(CFIType.SZ.W)
-  val sel      = new Valid(UInt(log2Ceil(nEntries).W))
 }
 
 class Predict(val addr_width: Int) extends Bundle with BTBParams {
@@ -101,12 +101,7 @@ class BTB(implicit conf: CPUConfig) extends Module with BTBParams {
   io.predict.Tg  := pc_cands(Mux(cfiType === CFIType.branch.U && !hcnt(1).toBool, CFIType.invalid.U, cfiType))
   io.predict.Sel := OHToUInt(off_sel)
   io.predict.Tp  := cfiType
-  if (conf.verbose) {
-    when (io.cyc > 16427.U && io.cyc < 16475.U) {
-      printf(p"BTB: pc = ${Hexadecimal(io.pc)} pc_plus = ${Hexadecimal(pc_plus)} cfiType = $cfiType pred_tg: ${Hexadecimal(io.predict.Tg)}\n")
-    }
-  }
-    // Feedback ports **exe stage**
+  // Feedback ports **exe stage**
   /*
   * 1. page already exists === need pc page equal and target page equal
   * 2. page can be inserted

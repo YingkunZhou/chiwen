@@ -6,9 +6,9 @@ import common.{CPUConfig, MemPortIo}
 
 class InterfaceIO(val data_width: Int) extends Bundle {
   val xcpt     = Input(new Valid(UInt(data_width.W)))
+  val forward  = Input(Bool())
   val if_kill  = Input(Bool())
   val dec_kill = Input(Bool())
-  val forward  = Input(Bool())
 
   val inst     = Output(Valid(UInt(data_width.W)))
   val pc       = Output(UInt(data_width.W))
