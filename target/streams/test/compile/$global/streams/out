@@ -1,4 +1,0 @@
-[0m[[0m[31merror[0m] [0m[0m/home/albert/CPU/chiwen/src/test/scala/myCore/Launcher.scala:12:28: too many arguments for constructor OneHotDecoder: ()myCore.OneHotDecoder[0m
-[0m[[0m[31merror[0m] [0m[0m      Driver.execute(() => new OneHotDecoder(8), manager) {[0m
-[0m[[0m[31merror[0m] [0m[0m                           ^[0m
-[0m[[0m[31merror[0m] [0m[0mone error found[0m
