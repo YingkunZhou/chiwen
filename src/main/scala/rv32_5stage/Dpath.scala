@@ -401,12 +401,11 @@ class DatPath(implicit val conf: CPUConfig) extends Module
    io.dmem.req.bits.data := mem_reg_rs2_data
 
   // Printout
-  printf("Core: Cyc= %d WB[ %x %x: 0x%x] (0x%x, 0x%x, 0x%x, 0x%x, 0x%x) %c %c %c ExeInst: DASM(%x)\n"
+  printf("Core: Cyc= %d WB[ %x %x: 0x%x] (0x%x, 0x%x, 0x%x, 0x%x) %c %c %c ExeInst: DASM(%x)\n"
     , csr.io.time(31,0)
     , wb_reg_ctrl_rf_wen
     , wb_reg_wbaddr
     , wb_reg_wbdata
-    , if_reg_pc
     , dec_reg_pc
     , exe_reg_pc
     , mem_reg_pc

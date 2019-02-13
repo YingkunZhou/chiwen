@@ -94,7 +94,7 @@ class CSRFileIO(implicit val conf: CPUConfig) extends Bundle {
   val tval = Input(UInt(conf.xprlen.W))
   val evec = Output(UInt(conf.xprlen.W))
   val illegal = Input(Bool())
-  val retire = Input(Bool())
+  val retire = Input(UInt(2.W))
   val pc = Input(UInt(conf.xprlen.W))
   val time = Output(UInt(conf.xprlen.W))
   val counters = Vec(60, new PerfCounterIO)

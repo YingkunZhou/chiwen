@@ -1,7 +1,4 @@
-[0m[[0m[31merror[0m] [0m[0m/home/albert/CPU/chiwen/src/main/scala/chiwen/Core.scala:293:89: value && is not a member of chisel3.core.UInt[0m
-[0m[[0m[31merror[0m] [0m[0m    mem_reg_jpnpc         := (Fill(conf.xprlen, alu.io.ctrl.pc_sel === PC_BRJMP).asUInt && alu.io.target.brjmp) ||[0m
-[0m[[0m[31merror[0m] [0m[0m                                                                                        ^[0m
-[0m[[0m[31merror[0m] [0m[0m/home/albert/CPU/chiwen/src/main/scala/chiwen/Core.scala:294:89: value && is not a member of chisel3.core.UInt[0m
-[0m[[0m[31merror[0m] [0m[0m                             (Fill(conf.xprlen, alu.io.ctrl.pc_sel === PC_JALR).asUInt  && alu.io.target.jpreg)[0m
-[0m[[0m[31merror[0m] [0m[0m                                                                                        ^[0m
-[0m[[0m[31merror[0m] [0m[0mtwo errors found[0m
+[0m[[0m[31merror[0m] [0m[0m/home/albert/CPU/chiwen/src/main/scala/fuxi/FetchInst.scala:7:8: Pulse is already defined as object Pulse[0m
+[0m[[0m[31merror[0m] [0m[0mobject Pulse {[0m
+[0m[[0m[31merror[0m] [0m[0m       ^[0m
+[0m[[0m[31merror[0m] [0m[0mone error found[0m

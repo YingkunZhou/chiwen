@@ -200,7 +200,7 @@ class BackEnd(implicit conf: CPUConfig) extends Module with BTBParams {
   }
   // Execute Stage ==========================================================================================================================================
   //=========================================================================================================================================================
-  val alus = Array.fill(2)(Module(new ALU()).io)
+  val alu = Array.fill(2)(Module(new ALU()).io)
   val fb_tg = Wire(Vec(2, UInt(conf.xprlen.W)))
   val pc_right = Wire(Vec(2, Bool()))
   for (i <- 0 until 2) {
@@ -213,18 +213,18 @@ class BackEnd(implicit conf: CPUConfig) extends Module with BTBParams {
     exe_wire(i).btbTp   := Mux(exe_valid(i), exe(i).btb.Tp, CFIType.invalid.U)
     exe_wire(i).illegal := exe(i).illegal && exe_valid(i)
 
-    alus(i).op1      := exe(i).op1_data
-    alus(i).op2      := exe(i).op2_data
-    alus(i).pc       := exe(i).pc
-    alus(i).rs2_data     := exe(i).rs2_data
-    alus(i).ctrl.fun     := exe(i).alu_fun
-    alus(i).ctrl.br_type := exe_wire(i).br_type
-    alus(i).ctrl.wb_sel  := exe(i).wb_sel
+    alu(i).op1      := exe(i).op1_data
+    alu(i).op2      := exe(i).op2_data
+    alu(i).pc       := exe(i).pc
+    alu(i).rs2_data     := exe(i).rs2_data
+    alu(i).ctrl.fun     := exe(i).alu_fun
+    alu(i).ctrl.br_type := exe_wire(i).br_type
+    alu(i).ctrl.wb_sel  := exe(i).wb_sel
 
-    exe_wbdata(i) := alus(i).result
-    fb_tg(i) := Mux(alus(i).ctrl.pc_sel === PC_BRJMP, alus(i).target.brjmp,
-                Mux(alus(i).ctrl.pc_sel === PC_JALR,  alus(i).target.jpreg,
-                                                      alus(i).target.conti))
+    exe_wbdata(i) := alu(i).result
+    fb_tg(i) := Mux(alu(i).ctrl.pc_sel === PC_BRJMP, alu(i).target.brjmp,
+                Mux(alu(i).ctrl.pc_sel === PC_JALR,  alu(i).target.jpreg,
+                                                      alu(i).target.conti))
     pc_right(i) := fb_tg(i) === exe(i).btb.Tg || !exe_valid(i)
   }
   // FIXME: in order to save time, may loose some precision
@@ -239,8 +239,8 @@ class BackEnd(implicit conf: CPUConfig) extends Module with BTBParams {
   exe_btb.Tp    := Mux(exe_sel(0), exe_wire(0).btbTp, exe_wire(1).btbTp)
   exe_btb.Tg    := Mux(exe_sel(0), exe(0).btb.Tg, exe(1).btb.Tg)
   exe_btb.Sel   := Mux(exe_sel(0), exe(0).btb.Sel, exe(1).btb.Sel)
-  exe_tg        := Mux(exe_sel(0), alus(0).target, alus(1).target)
-  val exe_pc_sel = Mux(exe_sel(0), alus(0).ctrl.pc_sel, alus(1).ctrl.pc_sel)
+  exe_tg        := Mux(exe_sel(0), alu(0).target, alu(1).target)
+  val exe_pc_sel = Mux(exe_sel(0), alu(0).ctrl.pc_sel, alu(1).ctrl.pc_sel)
 
   io.front.rasIO.pop := Pulse(exe_jump(Jump.pop).toBool, !stall(1)(Stage.MEM))
   io.front.rasIO.push.valid := Pulse(exe_jump(Jump.push).toBool, !stall(1)(Stage.MEM))
@@ -283,8 +283,8 @@ class BackEnd(implicit conf: CPUConfig) extends Module with BTBParams {
       mem(i).mem_typ  := exe(i).mem_typ
 
       mem_reg_exe_out(i) := exe_wbdata(i)
-      mem_reg_jpnpc(i):= (Fill(conf.xprlen, alus(i).ctrl.pc_sel === PC_BRJMP) & alus(i).target.brjmp) |
-        (Fill(conf.xprlen, alus(i).ctrl.pc_sel === PC_JALR) & alus(i).target.jpreg)
+      mem_reg_jpnpc(i):= (Fill(conf.xprlen, alu(i).ctrl.pc_sel === PC_BRJMP) & alu(i).target.brjmp) |
+        (Fill(conf.xprlen, alu(i).ctrl.pc_sel === PC_JALR) & alu(i).target.jpreg)
     }
   }
   // Memory Stage ============================================================================================================================================
@@ -422,23 +422,29 @@ class BackEnd(implicit conf: CPUConfig) extends Module with BTBParams {
   io.front.forward  := !stall(1).asUInt.orR
 
   // Printout
-  //  printf("Core: Cyc= %d WB[ %x %x: 0x%x] (0x%x, 0x%x, 0x%x, 0x%x, 0x%x) %c %c %c ExeInst: DASM(%x)\n"
-  //    , io.cyc
-  //    , wb_reg_rf_wen
-  //    , wb_reg_wbaddr
-  //    , wb_reg_wbdata
-  //    , if_reg_pc
-  //    , dec_pc
-  //    , exe_reg_pc
-  //    , mem_reg_pc
-  //    , RegNext(mem_reg_pc)
-  //    , Mux(mem_stall, Str("F"),             //FREEZE-> F
-  //      Mux(dec_stall, Str("S"), Str(" ")))  //STALL->S
-  //    , Mux(alu.io.ctrl.pc_sel === 1.U, Str("B"),    //BJ -> B
-  //      Mux(alu.io.ctrl.pc_sel === 2.U, Str("J"),    //JR -> J
-  //      Mux(alu.io.ctrl.pc_sel === 3.U, Str("E"),    //EX -> E
-  //      Mux(alu.io.ctrl.pc_sel === 0.U, Str(" "), Str("?")))))
-  //    , Mux(csr.io.illegal, Str("X"), Str(" "))
-  //    , Mux(xcpt, BUBBLE, exe_reg_inst)
-  //    )
+  for (i <- 0 until 2) {
+    printf("Core: Cyc= %d WB[ %x %x: 0x%x] (0x%x, 0x%x, 0x%x) [stall %c%c %c%c %c%c] %c%c %c%c Exe: DASM(%x)\n"
+      , io.cyc
+      , wb_wire(i).rf_wen
+      , wb(i).wbaddr
+      , wb_wbdata(i)
+      , io.front.pc(i)
+      , exe(i).pc
+      , mem(i).pc
+      , Mux(stall(i)(Stage.MEM), Str("M"), Str(" "))
+      , Str(""+i)
+      , Mux(stall(i)(Stage.EXE), Str("E"), Str(" "))
+      , Str(""+i)
+      , Mux(stall(i)(Stage.DEC), Str("D"), Str(" "))
+      , Str(""+i)
+      , Mux(alu(i).ctrl.pc_sel === 1.U, Str("B"),    //BJ -> B
+        Mux(alu(i).ctrl.pc_sel === 2.U, Str("J"),    //JR -> J
+        Mux(alu(i).ctrl.pc_sel === 3.U, Str("E"),    //EX -> E
+        Mux(alu(i).ctrl.pc_sel === 0.U, Str(" "), Str("?")))))
+      , Str(""+i)
+      , Mux(csr.io.illegal, Str("X"), Str(" "))
+      , Str(""+i)
+      , Mux(xcpt.valid || !exe_valid(i), BUBBLE, exe(i).inst)
+    )
+  }
 }

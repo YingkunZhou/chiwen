@@ -4,7 +4,7 @@
 		module="chiwen$sources"
 		revision="0.1"
 		status="integration"
-		publication="20190208141522"
+		publication="20190211011728"
 	/>
 	<configurations>
 		<conf name="compile" visibility="public" description=""/>

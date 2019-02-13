@@ -5,6 +5,13 @@ import chiwen._
 import common.{CPUConfig, CSR}
 import common.Instructions._
 
+object Jump {
+  val none = 0
+  val push = 1
+  val pop  = 2
+  val NUM  = pop + 1
+}
+
 class CtrlInfo extends Bundle {
   val br_type = UInt(BR_N.getWidth.W)
   val op1_sel = UInt(OP1_X.getWidth.W)
