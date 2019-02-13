@@ -15,10 +15,9 @@ class Tile(implicit val conf: CPUConfig) extends Module
   })
 
   val core   = Module(new Core())
-  core.io := DontCare
   val memory = Module(new AsyncScratchPadMemory(num_core_ports = 2))
-  val debug = Module(new DebugModule())
-  val trans = Module(new Transform())
+  val debug  = Module(new DebugModule())
+  val trans  = Module(new Transform())
   val simpleTrans = Module(new SimpleTrans())
 
   memory.io.core_ports(1) <> trans.io.outer

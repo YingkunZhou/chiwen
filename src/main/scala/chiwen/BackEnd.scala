@@ -85,7 +85,7 @@ class BackEnd(implicit conf: CPUConfig) extends Module with BTBParams {
   // ========================================================================================================================================================
   val xcpt      = Wire(Valid(UInt(conf.xprlen.W)))
   val stall     = Wire(Vec(Stage.Num, Bool()))
-  val dec       = Module(new InstDecoder())
+  val dec       = Module(new InstDecoder()).io
   val dec_wire  = Wire(new DecCrtl)
   val dec_valid = Wire(Bool())
   val exe       = Reg(new Exe(nEntries))
@@ -102,13 +102,13 @@ class BackEnd(implicit conf: CPUConfig) extends Module with BTBParams {
   val mem_wbdata = Wire(UInt(conf.xprlen.W))
   val wb_wbdata  = Reg(UInt(conf.xprlen.W))
 
-  dec.io.inst      := io.front.inst.bits
+  dec.inst         := io.front.inst.bits
   dec_valid        := io.front.inst.valid
   dec_wire.btbTp   := Mux(dec_valid, io.front.pred.Tp, CFIType.invalid.U)
-  dec_wire.jump    := Mux(dec_valid, dec.io.cinfo.cfi_jump, 0.U)
-  dec_wire.branch  := dec_valid && dec.io.cinfo.cfi_branch
-  dec_wire.rs1_oen := dec_valid && dec.io.cinfo.rs1_oen
-  dec_wire.rs2_oen := dec_valid && dec.io.cinfo.rs2_oen
+  dec_wire.jump    := Mux(dec_valid, dec.cinfo.cfi_jump, 0.U)
+  dec_wire.branch  := dec_valid && dec.cinfo.cfi_branch
+  dec_wire.rs1_oen := dec_valid && dec.cinfo.rs1_oen
+  dec_wire.rs2_oen := dec_valid && dec.cinfo.rs2_oen
 
   // Bypass Muxes
   val dec_op1_data  = Wire(UInt(conf.xprlen.W))
@@ -120,33 +120,33 @@ class BackEnd(implicit conf: CPUConfig) extends Module with BTBParams {
   val regfile = Module(new Regfile())
   val rf_rs1_data = Wire(UInt())
   val rf_rs2_data = Wire(UInt())
-  regfile.io.rs1_addr := dec.io.cinfo.rs1_addr
-  regfile.io.rs2_addr := dec.io.cinfo.rs2_addr
+  regfile.io.rs1_addr := dec.cinfo.rs1_addr
+  regfile.io.rs2_addr := dec.cinfo.rs2_addr
   rf_rs1_data := regfile.io.rs1_data
   rf_rs2_data := regfile.io.rs2_data
   // roll the OP1 mux into the bypass mux logic
   dec_rs1_data := MuxCase(rf_rs1_data, Array(
-    ((exe.wbaddr === dec.io.cinfo.rs1_addr) && exe_wire.rf_wen) -> exe_wbdata,
-    ((mem.wbaddr === dec.io.cinfo.rs1_addr) && mem_wire.rf_wen) -> mem_wbdata,
-    (( wb.wbaddr === dec.io.cinfo.rs1_addr) &&  wb_wire.rf_wen) -> wb_wbdata
+    ((exe.wbaddr === dec.cinfo.rs1_addr) && exe_wire.rf_wen) -> exe_wbdata,
+    ((mem.wbaddr === dec.cinfo.rs1_addr) && mem_wire.rf_wen) -> mem_wbdata,
+    (( wb.wbaddr === dec.cinfo.rs1_addr) &&  wb_wire.rf_wen) -> wb_wbdata
   ))
 
   dec_rs2_data := MuxCase(rf_rs2_data, Array(
-    ((exe.wbaddr === dec.io.cinfo.rs2_addr) && exe_wire.rf_wen) -> exe_wbdata,
-    ((mem.wbaddr === dec.io.cinfo.rs2_addr) && mem_wire.rf_wen) -> mem_wbdata,
-    (( wb.wbaddr === dec.io.cinfo.rs2_addr) &&  wb_wire.rf_wen) -> wb_wbdata
+    ((exe.wbaddr === dec.cinfo.rs2_addr) && exe_wire.rf_wen) -> exe_wbdata,
+    ((mem.wbaddr === dec.cinfo.rs2_addr) && mem_wire.rf_wen) -> mem_wbdata,
+    (( wb.wbaddr === dec.cinfo.rs2_addr) &&  wb_wire.rf_wen) -> wb_wbdata
   ))
 
   dec_op1_data := MuxCase(dec_rs1_data, Array(
-    (dec.io.cinfo.op1_sel === OP1_IMZ)-> dec.io.dinfo.imm_z,
-    (dec.io.cinfo.op1_sel === OP1_PC) -> io.front.pc))
+    (dec.cinfo.op1_sel === OP1_IMZ)-> dec.dinfo.imm_z,
+    (dec.cinfo.op1_sel === OP1_PC) -> io.front.pc))
 
   dec_op2_data := MuxCase(dec_rs2_data, Array(
-    (dec.io.cinfo.op2_sel === OP2_ITYPE)  -> dec.io.dinfo.imm_i,
-    (dec.io.cinfo.op2_sel === OP2_STYPE)  -> dec.io.dinfo.imm_s,
-    (dec.io.cinfo.op2_sel === OP2_SBTYPE) -> dec.io.dinfo.imm_sb,
-    (dec.io.cinfo.op2_sel === OP2_UTYPE)  -> dec.io.dinfo.imm_u,
-    (dec.io.cinfo.op2_sel === OP2_UJTYPE) -> dec.io.dinfo.imm_uj))
+    (dec.cinfo.op2_sel === OP2_ITYPE)  -> dec.dinfo.imm_i,
+    (dec.cinfo.op2_sel === OP2_STYPE)  -> dec.dinfo.imm_s,
+    (dec.cinfo.op2_sel === OP2_SBTYPE) -> dec.dinfo.imm_sb,
+    (dec.cinfo.op2_sel === OP2_UTYPE)  -> dec.dinfo.imm_u,
+    (dec.cinfo.op2_sel === OP2_UJTYPE) -> dec.dinfo.imm_uj))
 
   val if_mispredict = Wire(Bool())
   if (!conf.hasBTB) if_mispredict := false.B
@@ -157,28 +157,28 @@ class BackEnd(implicit conf: CPUConfig) extends Module with BTBParams {
     exe_valid := false.B
   }.elsewhen(!stall(Stage.EXE) && !stall(Stage.MEM)) {
     exe_valid    := dec_valid
-    exe.rf_wen   := dec.io.cinfo.rf_wen
-    exe.mem_en   := dec.io.cinfo.mem_en
+    exe.rf_wen   := dec.cinfo.rf_wen
+    exe.mem_en   := dec.cinfo.mem_en
     // convert CSR instructions with raddr1 == 0 to read-only CSR commands
-    exe.csr_cmd  := Mux((dec.io.cinfo.csr_cmd === CSR.S || dec.io.cinfo.csr_cmd === CSR.C) &&
-      dec.io.cinfo.rs1_addr === 0.U, CSR.R, dec.io.cinfo.csr_cmd)
-    exe.illegal  := dec.io.cinfo.illegal
-    exe.br_type  := dec.io.cinfo.br_type
+    exe.csr_cmd  := Mux((dec.cinfo.csr_cmd === CSR.S || dec.cinfo.csr_cmd === CSR.C) &&
+      dec.cinfo.rs1_addr === 0.U, CSR.R, dec.cinfo.csr_cmd)
+    exe.illegal  := dec.cinfo.illegal
+    exe.br_type  := dec.cinfo.br_type
     exe.pc       := io.front.pc
     exe.op1_data := dec_op1_data
     exe.op2_data := dec_op2_data
     exe.rs2_data := dec_rs2_data
-    exe.inst     := dec.io.inst
-    exe.alu_fun  := dec.io.cinfo.alu_fun
-    exe.wb_sel   := dec.io.cinfo.wb_sel
-    exe.wbaddr   := dec.io.cinfo.wbaddr
-    exe.mem_fcn  := dec.io.cinfo.mem_fcn
-    exe.mem_typ  := dec.io.cinfo.mem_typ
-    exe.branch   := dec.io.cinfo.cfi_branch
-    exe.jump     := dec.io.cinfo.cfi_jump
+    exe.inst     := dec.inst
+    exe.alu_fun  := dec.cinfo.alu_fun
+    exe.wb_sel   := dec.cinfo.wb_sel
+    exe.wbaddr   := dec.cinfo.wbaddr
+    exe.mem_fcn  := dec.cinfo.mem_fcn
+    exe.mem_typ  := dec.cinfo.mem_typ
+    exe.branch   := dec.cinfo.cfi_branch
+    exe.jump     := dec.cinfo.cfi_jump
     exe.btb.Tp   := io.front.pred.Tp
-    exe.btb.Tg   := Mux(if_mispredict, io.front.rasIO.peek, io.front.pred.Tg)
     exe.btb.Sel  := io.front.pred.Sel
+    exe.btb.Tg   := Mux(if_mispredict, io.front.rasIO.peek, io.front.pred.Tg)
   }
   // Execute Stage ==========================================================================================================================================
   //=========================================================================================================================================================
@@ -191,24 +191,24 @@ class BackEnd(implicit conf: CPUConfig) extends Module with BTBParams {
   exe_wire.btbTp   := Mux(exe_valid, exe.btb.Tp, CFIType.invalid.U)
   exe_wire.illegal := exe.illegal && exe_valid
 
-  val alu = Module(new ALU())
-  alu.io.alu_op1      := exe.op1_data
-  alu.io.alu_op2      := exe.op2_data
-  alu.io.rs2_data     := exe.rs2_data
-  alu.io.pc           := exe.pc
-  alu.io.ctrl.fun     := exe.alu_fun
-  alu.io.ctrl.br_type := exe_wire.br_type
-  alu.io.ctrl.wb_sel  := exe.wb_sel
+  val alu = Module(new ALU()).io
+  alu.op1          := exe.op1_data
+  alu.op2          := exe.op2_data
+  alu.rs2_data     := exe.rs2_data
+  alu.pc           := exe.pc
+  alu.ctrl.fun     := exe.alu_fun
+  alu.ctrl.br_type := exe_wire.br_type
+  alu.ctrl.wb_sel  := exe.wb_sel
 
-  exe_wbdata := alu.io.alu_result
+  exe_wbdata := alu.result
 
   io.front.rasIO.pop := Pulse(exe_wire.jump(Jump.pop).toBool, !stall(Stage.MEM))
   io.front.rasIO.push.valid := Pulse(exe_wire.jump(Jump.push).toBool, !stall(Stage.MEM))
-  io.front.rasIO.push.bits  := alu.io.target.conti
+  io.front.rasIO.push.bits  := alu.target.conti
 
   io.front.feedBack.sel.valid := Pulse(exe_wire.btbTp =/= CFIType.invalid.U, !stall(Stage.MEM))
   io.front.feedBack.sel.bits  := exe.btb.Sel
-  io.front.feedBack.redirect  := Pulse(alu.io.ctrl.pc_sel === PC_BRJMP || alu.io.ctrl.pc_sel === PC_JALR, !stall(Stage.MEM))
+  io.front.feedBack.redirect  := Pulse(alu.ctrl.pc_sel === PC_BRJMP || alu.ctrl.pc_sel === PC_JALR, !stall(Stage.MEM))
   io.front.feedBack.pc        := exe.pc
   val fb_cfiType =
     Mux(exe_wire.branch,                                      CFIType.branch.U,
@@ -218,15 +218,15 @@ class BackEnd(implicit conf: CPUConfig) extends Module with BTBParams {
     )))
   io.front.feedBack.cfiType := fb_cfiType
   val fb_tg =
-    Mux(alu.io.ctrl.pc_sel === PC_BRJMP, alu.io.target.brjmp,
-    Mux(alu.io.ctrl.pc_sel === PC_JALR,  alu.io.target.jpreg,
-                                         alu.io.target.conti
+    Mux(alu.ctrl.pc_sel === PC_BRJMP, alu.target.brjmp,
+    Mux(alu.ctrl.pc_sel === PC_JALR,  alu.target.jpreg,
+                                         alu.target.conti
     ))
   io.front.feedBack.target := fb_tg
 
   val dec_mispredict = Wire(Bool())
   if (conf.hasBTB) dec_mispredict := fb_tg =/= exe.btb.Tg && exe_valid
-  else dec_mispredict := alu.io.ctrl.pc_sel =/= PC_4
+  else dec_mispredict := alu.ctrl.pc_sel =/= PC_4
 
   val mem_reg_exe_out = Reg(UInt(conf.xprlen.W))
   val mem_reg_jpnpc   = RegInit(0.U(conf.xprlen.W))
@@ -248,8 +248,8 @@ class BackEnd(implicit conf: CPUConfig) extends Module with BTBParams {
     mem.mem_typ  := exe.mem_typ
 
     mem_reg_exe_out := exe_wbdata
-    mem_reg_jpnpc:= (Fill(conf.xprlen, alu.io.ctrl.pc_sel === PC_BRJMP) & alu.io.target.brjmp) |
-                    (Fill(conf.xprlen, alu.io.ctrl.pc_sel === PC_JALR)  & alu.io.target.jpreg)
+    mem_reg_jpnpc:= (Fill(conf.xprlen, alu.ctrl.pc_sel === PC_BRJMP) & alu.target.brjmp) |
+                    (Fill(conf.xprlen, alu.ctrl.pc_sel === PC_JALR)  & alu.target.jpreg)
   }
   // Memory Stage ============================================================================================================================================
   //==========================================================================================================================================================
@@ -325,8 +325,8 @@ class BackEnd(implicit conf: CPUConfig) extends Module with BTBParams {
   val exe_load_inst: Bool = exe_wire.mem_en && exe.mem_fcn === M_XRD
 
   stall(Stage.DEC) :=
-    (exe_load_inst && exe.wbaddr === dec.io.cinfo.rs1_addr && dec.io.cinfo.rs1_addr =/= 0.U && dec_wire.rs1_oen) ||
-    (exe_load_inst && exe.wbaddr === dec.io.cinfo.rs2_addr && dec.io.cinfo.rs2_addr =/= 0.U && dec_wire.rs2_oen) ||
+    (exe_load_inst && exe.wbaddr === dec.cinfo.rs1_addr && dec.cinfo.rs1_addr =/= 0.U && dec_wire.rs1_oen) ||
+    (exe_load_inst && exe.wbaddr === dec.cinfo.rs2_addr && dec.cinfo.rs2_addr =/= 0.U && dec_wire.rs2_oen) ||
     exe_wire.csr_cmd =/= CSR.N
 
   stall(Stage.EXE) := false.B
@@ -350,10 +350,10 @@ class BackEnd(implicit conf: CPUConfig) extends Module with BTBParams {
     , RegNext(mem.pc)
     , Mux(stall(Stage.MEM), Str("F"),             //FREEZE-> F
       Mux(stall(Stage.DEC), Str("S"), Str(" ")))  //STALL->S
-    , Mux(alu.io.ctrl.pc_sel === 1.U, Str("B"),    //BJ -> B
-      Mux(alu.io.ctrl.pc_sel === 2.U, Str("J"),    //JR -> J
-      Mux(alu.io.ctrl.pc_sel === 3.U, Str("E"),    //EX -> E
-      Mux(alu.io.ctrl.pc_sel === 0.U, Str(" "), Str("?")))))
+    , Mux(alu.ctrl.pc_sel === 1.U, Str("B"),    //BJ -> B
+      Mux(alu.ctrl.pc_sel === 2.U, Str("J"),    //JR -> J
+      Mux(alu.ctrl.pc_sel === 3.U, Str("E"),    //EX -> E
+      Mux(alu.ctrl.pc_sel === 0.U, Str(" "), Str("?")))))
     , Mux(csr.io.illegal, Str("X"), Str(" "))
     , Mux(xcpt.valid || !exe_valid, BUBBLE, exe.inst)
   )

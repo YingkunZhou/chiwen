@@ -2,9 +2,15 @@ package fuxi
 
 import chisel3._
 import chisel3.util._
-import chiwen._
 import common.{CPUConfig, CSR}
 import common.Instructions._
+
+object Jump {
+  val none = 0
+  val push = 1
+  val pop  = 2
+  val NUM: Int  = pop + 1
+}
 
 class CtrlInfo extends Bundle {
   val br_type = UInt(BR_N.getWidth.W)
@@ -23,9 +29,6 @@ class CtrlInfo extends Bundle {
   val fencei  = Bool()
   val cfi_branch = Bool()
   val cfi_jump = UInt(Jump.NUM.W)
-  val rs1_addr = UInt(5.W)
-  val rs2_addr = UInt(5.W)
-  val wbaddr   = UInt(5.W)
 }
 
 class DataInfo(val data_width: Int) extends Bundle {
@@ -39,13 +42,16 @@ class DataInfo(val data_width: Int) extends Bundle {
 
 class InstDecoder(implicit conf: CPUConfig) extends Module {
   val io = IO(new Bundle {
-    val inst = Flipped(new ValidIO(UInt(conf.xprlen.W)))
+    val inst  = Input(UInt(conf.xprlen.W))
     val cinfo = Output(new CtrlInfo())
     val dinfo = Output(new DataInfo(conf.xprlen))
+    val rs1_addr = Output(UInt(5.W))
+    val rs2_addr = Output(UInt(5.W))
+    val wbaddr   = Output(UInt(5.W))
   })
 
   val signals =
-    ListLookup(io.inst.bits,
+    ListLookup(io.inst,
                  List(N, BR_N  , OP1_X , OP2_X    , OEN_0, OEN_0, ALU_X   , WB_X  ,  REN_0, MEN_0, M_X  , MT_X, CSR.N, N),
       Array(   /* val  |  BR  |  op1  |   op2     |  R1  |  R2  |  ALU    |  wb   | rf   | mem  | mem  | mask | csr | fence.i */
                /* inst | type |   sel |    sel    |  oen |  oen |   fcn   |  sel  | wen  |  en  |  wr  | type | cmd |         */
@@ -125,14 +131,14 @@ class InstDecoder(implicit conf: CPUConfig) extends Module {
   io.cinfo.mem_fcn := mem_fcn
   io.cinfo.mem_typ := mem_typ
   io.cinfo.csr_cmd := csr_cmd
-  io.cinfo.illegal := !val_inst && io.inst.valid //illegal instruction
-  io.cinfo.fencei  := fencei && io.inst.valid
+  io.cinfo.illegal := !val_inst //illegal instruction
+  io.cinfo.fencei  := fencei
 
-  io.cinfo.rs1_addr := io.inst.bits(RS1_MSB, RS1_LSB)
-  io.cinfo.rs2_addr := io.inst.bits(RS2_MSB, RS2_LSB)
-  io.cinfo.wbaddr   := io.inst.bits(RD_MSB , RD_LSB)
+  io.rs1_addr := io.inst(RS1_MSB, RS1_LSB)
+  io.rs2_addr := io.inst(RS2_MSB, RS2_LSB)
+  io.wbaddr   := io.inst(RD_MSB , RD_LSB)
 
-  val func = io.inst.bits(6,0)
+  val func = io.inst(6,0)
   io.cinfo.cfi_branch := func === "b1100011".U
   def link(addr: UInt): Bool = addr === 1.U || addr === 5.U
   /*
@@ -149,25 +155,25 @@ class InstDecoder(implicit conf: CPUConfig) extends Module {
   val cfiType_jal: Bool  = func === "b1101111".U
   val cfiType_jalr: Bool = func === "b1100111".U
   val cifType_jump       = Wire(Vec(Jump.NUM, Bool()))
-  val pop_push: Bool     =  cfiType_jalr &&  link(io.cinfo.wbaddr) && link(io.cinfo.rs1_addr)  && io.cinfo.wbaddr =/= io.cinfo.rs1_addr
-  cifType_jump(Jump.none) := (cfiType_jalr && !link(io.cinfo.wbaddr) && !link(io.cinfo.rs1_addr))  || //case 1
-    (cfiType_jal  && !link(io.cinfo.wbaddr))    // case 2
+  val pop_push: Bool     =  cfiType_jalr &&  link(io.wbaddr) && link(io.rs1_addr)  && io.wbaddr =/= io.rs1_addr
+  cifType_jump(Jump.none) := (cfiType_jalr && !link(io.wbaddr) && !link(io.rs1_addr))  || //case 1
+    (cfiType_jal  && !link(io.wbaddr))    // case 2
 
-  cifType_jump(Jump.push) := (cfiType_jal  &&  link(io.cinfo.wbaddr))||  // case 1
-    (cfiType_jalr &&  link(io.cinfo.wbaddr) && !link(io.cinfo.rs1_addr)) || // case 2
-    (cfiType_jalr &&  link(io.cinfo.wbaddr) &&  link(io.cinfo.rs1_addr)  && io.cinfo.wbaddr === io.cinfo.rs1_addr) || //case 3
+  cifType_jump(Jump.push) := (cfiType_jal  &&  link(io.wbaddr))||  // case 1
+    (cfiType_jalr &&  link(io.wbaddr) && !link(io.rs1_addr)) || // case 2
+    (cfiType_jalr &&  link(io.wbaddr) &&  link(io.rs1_addr)  && io.wbaddr === io.rs1_addr) || //case 3
     pop_push // case 4
 
-  cifType_jump(Jump.pop)  :=  cfiType_jalr && !link(io.cinfo.wbaddr) &&  link(io.cinfo.rs1_addr)  || //case 1
+  cifType_jump(Jump.pop)  :=  cfiType_jalr && !link(io.wbaddr) &&  link(io.rs1_addr)  || //case 1
     pop_push // case 2
 
   io.cinfo.cfi_jump := cifType_jump.asUInt
   // immediates
-  val imm_itype  = io.inst.bits(31,20)
-  val imm_stype  = Cat(io.inst.bits(31,25), io.inst.bits(11,7))
-  val imm_sbtype = Cat(io.inst.bits(31), io.inst.bits(7), io.inst.bits(30, 25), io.inst.bits(11,8))
-  val imm_utype  = io.inst.bits(31, 12)
-  val imm_ujtype = Cat(io.inst.bits(31), io.inst.bits(19,12), io.inst.bits(20), io.inst.bits(30,21))
+  val imm_itype  = io.inst(31,20)
+  val imm_stype  = Cat(io.inst(31,25), io.inst(11,7))
+  val imm_sbtype = Cat(io.inst(31), io.inst(7), io.inst(30, 25), io.inst(11,8))
+  val imm_utype  = io.inst(31, 12)
+  val imm_ujtype = Cat(io.inst(31), io.inst(19,12), io.inst(20), io.inst(30,21))
 
   // sign-extend immediates
   io.dinfo.imm_i  := Cat(Fill(20,imm_itype(11)), imm_itype)
@@ -175,6 +181,6 @@ class InstDecoder(implicit conf: CPUConfig) extends Module {
   io.dinfo.imm_sb := Cat(Fill(19,imm_sbtype(11)), imm_sbtype, 0.U)
   io.dinfo.imm_u  := Cat(imm_utype, Fill(12,0.U))
   io.dinfo.imm_uj := Cat(Fill(11,imm_ujtype(19)), imm_ujtype, 0.U)
-  io.dinfo.imm_z  := Cat(Fill(27,0.U), io.inst.bits(19,15))
+  io.dinfo.imm_z  := Cat(Fill(27,0.U), io.inst(19,15))
 
 }

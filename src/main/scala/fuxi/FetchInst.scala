@@ -5,137 +5,154 @@ import chisel3.util._
 import common.{CPUConfig, Str}
 
 object LatchData {
-  def apply(valid: Bool, data: UInt, init: UInt = 0.U): UInt = {
-    val data_latch = RegInit(init)
-    when (valid) { data_latch := data }
-    Mux(valid, data, data_latch)
+  def apply(in: Bool, data: UInt, deflt: UInt = 0.U): UInt = {
+    val data_latch = RegInit(deflt)
+    when (in) { data_latch := data }
+    Mux(in, data, data_latch)
   }
-}
-
-class PredIO(val addr_width: Int) extends Bundle with BTBParams {
-  val Tp  = Input(UInt(CFIType.SZ.W))
-  val Tg  = Input(UInt(addr_width.W))
-  val Sel = Input(UInt(log2Ceil(nEntries).W))
 }
 
 class FetchInst(implicit conf: CPUConfig) extends Module with BTBParams {
   val io = IO(new Bundle {
-    val if_pred    = new PredIO(conf.xprlen)
-    val dec_pred   = Flipped(new PredIO(conf.xprlen))
-
-    val pc         = Input(UInt(conf.xprlen.W))
-    val pc_forward = Output(Bool())
-
-    val mem        = new AxiIO(conf.xprlen)
-    val forward    = Input(Bool())
-    val redirect   = Input(Bool())
-
-    val inst       = Output(UInt(conf.xprlen.W))
-    val inst_valid = Output(Bool())
-    val dec_pc     = Output(UInt(conf.xprlen.W))
     val cyc = Input(UInt(conf.xprlen.W))
+    val mem = new AxiIO(conf.xprlen)
 
+    val if_btb     = Input(Vec(2, new Predict(conf.xprlen)))
+    val dec_btb    = Output(Vec(2, new Predict(conf.xprlen)))
+    val pc         = Input(UInt(conf.xprlen.W))
+    val pc_split   = Input(Bool())
+    val pc_forward = Output(Bool())
+    val forward    = Input(Bool())
+    val if_kill    = Input(Bool()) // from dec and downflow
+    val dec_kill   = Input(Bool()) // from exe and downflow
+    val inst       = Output(Vec(2, Valid(UInt(conf.xprlen.W))))
+    val dec_pc     = Output(Vec(2, UInt(conf.xprlen.W)))
   })
 
   val sWtAddrOK :: sWtInstOK :: sWtForward :: Nil = Enum(3)
   val state = RegInit(sWtAddrOK)
-  val use_cc: Bool   = true.B
+  val pc = Wire(UInt(conf.xprlen.W))
   val pc_valid = Wire(Bool())
-  val pc       = Wire(UInt(conf.xprlen.W))
   val icache = Module(new Icache())
   icache.io.cyc := io.cyc
   icache.io.axi.r <> io.mem.r
   icache.io.axi.ar.ready := io.mem.ar.ready
   icache.io.core.pc := pc
-  icache.io.core.pc_valid := use_cc & pc_valid
-  io.mem.ar.id    := Mux(use_cc, icache.io.axi.ar.id, conf.incRd)
-  io.mem.ar.valid := Mux(use_cc, icache.io.axi.ar.valid, pc_valid)
-  io.mem.ar.addr  := Mux(use_cc, icache.io.axi.ar.addr, pc)
-  io.mem.ar.burst := Mux(use_cc, icache.io.axi.ar.burst, "b01".U)
-  io.mem.ar.len   := Mux(use_cc, icache.io.axi.ar.len, 0.U)
-  io.mem.ar.size  := Mux(use_cc, icache.io.axi.ar.size, "b010".U)
+  icache.io.core.pc_valid := conf.use_cc.B & pc_valid
+  io.mem.ar.id    := Mux(conf.use_cc.B, icache.io.axi.ar.id, conf.incRd)
+  io.mem.ar.valid := Mux(conf.use_cc.B, icache.io.axi.ar.valid, pc_valid)
+  io.mem.ar.addr  := Mux(conf.use_cc.B, icache.io.axi.ar.addr, pc)
+  io.mem.ar.burst := Mux(conf.use_cc.B, icache.io.axi.ar.burst, "b01".U)
+  io.mem.ar.len   := Mux(conf.use_cc.B, icache.io.axi.ar.len, 0.U)
+  io.mem.ar.size  := Mux(conf.use_cc.B, icache.io.axi.ar.size, "b010".U)
+  val addr_ready: Bool = Mux(conf.use_cc.B, icache.io.core.ready, !icache.io.axi.ar.valid && io.mem.ar.ready)
 
-  val addr_ready: Bool = Mux(use_cc, icache.io.core.ready, !icache.io.axi.ar.valid && io.mem.ar.ready)
-  val inst_valid: Bool = Mux(io.mem.r.id === conf.incRd ,io.mem.r.valid, icache.io.core.inst_valid)
-  val inst: UInt       = Mux(io.mem.r.id === conf.iccRd, icache.io.core.inst, io.mem.r.data)
+  val inst_odd   = RegInit(false.B)
+  val inst_kill  = RegInit(false.B)
+  val inst_split = RegInit(false.B)
+  val inst_valid = Wire(Vec(2, Bool()))
+  inst_valid(0) := Mux(io.mem.r.id === conf.incRd, io.mem.r.valid && !inst_odd, icache.io.core.inst_valid(0))
+  inst_valid(1) := Mux(io.mem.r.id === conf.incRd, io.mem.r.valid &&  inst_odd, icache.io.core.inst_valid(1))
+  val inst = Wire(Vec(2, UInt(conf.xprlen.W)))
+  inst(0) := Mux(io.mem.r.id === conf.iccRd, icache.io.core.inst(0),
+             Mux(!inst_odd, io.mem.r.data, BUBBLE))
+  inst(1) := Mux(io.mem.r.id === conf.iccRd, icache.io.core.inst(1),
+             Mux( inst_odd, io.mem.r.data, BUBBLE))
 
-  val kill = RegInit(false.B)
-  when ((state === sWtInstOK && inst_valid) || state === sWtForward) { kill := false.B
-  }.elsewhen(io.redirect) {kill := true.B}
+  val valid_orR: Bool = inst_valid.asUInt.orR
+  val valid_and: Bool = inst_valid.asUInt.andR
 
+  val next_odd: Bool = !inst_odd   && !inst_valid(1) &&
+                      (!inst_split || pc(conf.pcLSB).toBool)
   switch (state) {
     is (sWtAddrOK) {
-      when (addr_ready)              { state := sWtInstOK
-      }
+      when (addr_ready)           { state := sWtInstOK }
     }
     is (sWtInstOK) {
-      when (inst_valid) {
-        when (io.redirect)           { state := sWtAddrOK
-        }.elsewhen(kill||io.forward) { state := Mux(addr_ready, sWtInstOK, sWtAddrOK)
-        }.otherwise                  { state := sWtForward
-        }
+      when (valid_orR) {
+        when (io.dec_kill)        { state := sWtAddrOK
+        }.elsewhen(io.forward ||
+          inst_kill || next_odd)  { state := Mux(!addr_ready || io.if_kill, sWtAddrOK, sWtInstOK)
+        }.otherwise               { state := sWtForward }
       }
     }
     is (sWtForward) {
-      when (io.redirect)             { state := sWtAddrOK
-      }.elsewhen(io.forward)         { state := Mux(addr_ready, sWtInstOK, sWtAddrOK)
-      }
+      when (io.dec_kill)          { state := sWtAddrOK
+      }.elsewhen(io.forward)      { state := Mux(!addr_ready || io.if_kill, sWtAddrOK, sWtInstOK) }
     }
   }
 
-  val maintain_pc = Reg(UInt(conf.xprlen.W))
-  when (io.redirect) { maintain_pc := io.pc }
+  when ((state === sWtInstOK && valid_orR) || state === sWtForward) { inst_kill := false.B
+  }.elsewhen(io.if_kill) { inst_kill := true.B } // FIXME: if_kill > dec_kill
 
-  val maintain: Bool = RegInit(false.B)
+  val state_WtForward = RegInit(false.B)
+  when (io.dec_kill || io.forward || inst_kill) { state_WtForward := false.B
+  }.elsewhen(state === sWtInstOK && inst_valid(0) && next_odd) { state_WtForward := true.B  }
+
+  val kill_pc = Reg(UInt(conf.xprlen.W))
+  when (io.if_kill) { kill_pc := pc }
+
+  val pc_kill: Bool = RegInit(false.B)
   when(state === sWtAddrOK) {
-    when(addr_ready)        { maintain := false.B
-    }.elsewhen(io.redirect) { maintain := true.B
+    when(addr_ready)       { pc_kill := false.B
+    }.elsewhen(io.if_kill) { pc_kill := true.B }
+  }
+
+  val pc_odd: Bool = Latch(state === sWtInstOK && !inst_odd && inst_valid(0) && !inst_valid(1) && !inst_split,
+                           addr_ready, !(io.if_kill || inst_kill))
+  val flip_pc = Mux(pc_odd, Cat(io.dec_pc(0)(conf.xprlen-1, conf.pcLSB+1), 1.U(1.W), 0.U(conf.pcLSB.W)), io.pc)
+  pc := Mux(pc_kill, kill_pc, flip_pc)
+  /*========================pc part============================*/
+  io.pc_forward := io.if_kill || addr_ready && ((state === sWtForward && io.forward) ||
+                                 !pc_odd && ((state === sWtAddrOK  && !pc_kill)   ||
+  (Mux(inst_odd,inst_valid(1),valid_and) &&   state === sWtInstOK  && (io.forward || inst_kill))))
+
+
+  pc_valid := state === sWtAddrOK || !io.if_kill && ((state === sWtForward && io.forward) ||
+    (state === sWtInstOK  && valid_orR && (io.forward || inst_kill || next_odd)))
+
+  when(pc_valid) {
+    inst_odd    := pc(conf.pcLSB)
+    inst_split  := io.pc_split
+  }
+
+  val reg_pred = Reg(Vec(2, new Predict(conf.xprlen)))
+  val reg_pc   = RegInit(VecInit(Seq.fill(2)(START_ADDR)))
+  when (pc_valid) {
+    when (pc(conf.pcLSB).toBool) {
+      reg_pc(1)   := flip_pc
+      reg_pred(1) := io.if_btb(1)
+    }.otherwise {
+      reg_pc(0)   := io.pc
+      reg_pc(1)   := Cat(io.pc(conf.xprlen-1, conf.pcLSB+1), 1.U(1.W), 0.U(conf.pcLSB.W))
+      for (i <- 0 until 2) { reg_pred(i) := io.if_btb(i)}
     }
   }
-  val cond_WtAddrOK: Bool  = state === sWtAddrOK
-  val cond_WtInstOK: Bool  = state === sWtInstOK  && inst_valid && (io.forward || kill)
-  val cond_WtForward: Bool = state === sWtForward && io.forward
-  pc_valid := cond_WtAddrOK || ((cond_WtInstOK || cond_WtForward) && !io.redirect)
-  pc := Mux(maintain, maintain_pc, io.pc)
-  io.pc_forward := (((cond_WtAddrOK && !maintain) || cond_WtInstOK || cond_WtForward) && addr_ready) || io.redirect
-
-  io.inst := LatchData(inst_valid, inst, BUBBLE)
-  io.inst_valid := ((state === sWtInstOK   && inst_valid) ||
-                     state === sWtForward) && !kill
-
-  val reg_PredTp  = Reg(UInt(CFIType.SZ.W))
-  val reg_predTg  = Reg(UInt(conf.xprlen.W))
-  val reg_PredSel = Reg(UInt(log2Ceil(nEntries).W))
-  val reg_pc      = RegInit(START_ADDR)
-
-  when((cond_WtAddrOK || cond_WtInstOK || cond_WtForward) && addr_ready) { //enter into dec stage wait for inst come back
-    reg_PredTp  := io.if_pred.Tp
-    reg_predTg  := io.if_pred.Tg
-    reg_PredSel := io.if_pred.Sel
-    reg_pc      := io.pc
+  /*=======================dec part==============================*/
+  io.inst(0).valid := ((state === sWtInstOK && inst_valid(0) && !inst_kill) || state_WtForward) && !io.dec_kill
+  io.inst(1).valid := ((state === sWtInstOK && inst_valid(1) && !inst_kill) || state === sWtForward) && !inst_split && !io.dec_kill
+  for (i <- 0 until 2) {
+    io.dec_btb(i)   := reg_pred(i)
+    io.dec_pc(i)    := reg_pc(i)
+    io.inst(i).bits := LatchData(inst_valid(i), inst(i), BUBBLE)
   }
 
-  io.dec_pred.Tp  := Mux(io.inst_valid, reg_PredTp, CFIType.invalid.U(CFIType.SZ.W))
-  io.dec_pred.Tg  := reg_predTg
-  io.dec_pred.Sel := reg_PredSel
-  io.dec_pc       := reg_pc
-
-//  printf("%c, pc = %x, valid = %x, frwd = %x, redirect = %x, inst = %x, valid = %x, frwd = %x, dec_pc = %x, memReady = %x, memValid = %x\n"
-//    , MuxCase(Str("A"), Array(
-//      (state === sWtInstOK) -> Str("I"),
-//      (state === sWtForward) -> Str("F")
-//    ))
-//    ,io.pc
-//    ,pc_valid
-//    ,io.pc_forward
-//    ,io.redirect
-//    ,io.inst
-//    ,io.inst_valid
-//    ,io.forward
-//    ,io.dec_pc
-////    ,addr_ready
-//    ,io.mem.r.id
-////    ,inst_valid
-//    ,io.mem.r.valid
-//  )
+  //  printf("%c, pc = %x, valid = %x, frwd = %x, redirect = %x, inst = %x, valid = %x, frwd = %x, dec_pc = %x, memReady = %x, memValid = %x\n"
+  //    , MuxCase(Str("A"), Array(
+  //      (state === sWtInstOK) -> Str("I"),
+  //      (state === sWtForward) -> Str("F")
+  //    ))
+  //    ,io.pc
+  //    ,pc_valid
+  //    ,io.pc_forward
+  //    ,io.redirect
+  //    ,io.inst
+  //    ,io.inst_valid
+  //    ,io.forward
+  //    ,io.dec_pc
+  ////    ,addr_ready
+  //    ,io.mem.r.id
+  ////    ,inst_valid
+  //    ,io.mem.r.valid
+  //  )
 }

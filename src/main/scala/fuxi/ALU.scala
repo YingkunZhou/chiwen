@@ -2,7 +2,6 @@ package fuxi
 
 import chisel3._
 import chisel3.util.{Cat, MuxCase}
-import chiwen._
 import common.CPUConfig
 
 class Target(val addr_width: Int) extends Bundle {
@@ -15,49 +14,49 @@ class CtrlIO extends Bundle {
   val fun      = Input(UInt(ALU_X.getWidth.W))
   val br_type  = Input(UInt(BR_N.getWidth.W))
   val wb_sel   = Input(UInt(WB_X.getWidth.W))
-  val pc_sel   = Output(UInt(2.W))
+  val pc_sel   = Output(UInt(PC_4.getWidth.W))
 }
 
 class ALU(implicit conf: CPUConfig) extends Module {
   val io = IO(new Bundle {
-    val alu_op1  = Input(UInt(conf.xprlen.W))
-    val alu_op2  = Input(UInt(conf.xprlen.W))
+    val op1  = Input(UInt(conf.xprlen.W))
+    val op2  = Input(UInt(conf.xprlen.W))
+    val pc   = Input(UInt(conf.xprlen.W))
+    val ctrl = new CtrlIO()
     val rs2_data = Input(UInt(conf.xprlen.W))
-    val pc       = Input(UInt(conf.xprlen.W))
-    val alu_result = Output(UInt(conf.xprlen.W))
-    val ctrl     = new CtrlIO()
+    val result   = Output(UInt(conf.xprlen.W))
     val target   = Output(new Target(conf.xprlen))
   })
 
   // ALU
-  val alu_shamt: UInt  = io.alu_op2(4,0).asUInt
-  val add_result: UInt = (io.alu_op1 + io.alu_op2)(conf.xprlen-1,0)
+  val alu_shamt: UInt  = io.op2(4,0).asUInt
+  val add_result: UInt = (io.op1 + io.op2)(conf.xprlen-1,0)
 
   //only for debug purposes right now until debug() works
   val result = Wire(UInt(conf.xprlen.W))
   result := MuxCase(0.U, Array(   // FIXME: why default is exe_reg_inst
     (io.ctrl.fun === ALU_ADD)   -> add_result,
-    (io.ctrl.fun === ALU_SUB)   -> (io.alu_op1 - io.alu_op2).asUInt,
-    (io.ctrl.fun === ALU_AND)   -> (io.alu_op1 & io.alu_op2).asUInt,
-    (io.ctrl.fun === ALU_OR)    -> (io.alu_op1 | io.alu_op2).asUInt,
-    (io.ctrl.fun === ALU_XOR)   -> (io.alu_op1 ^ io.alu_op2).asUInt,
-    (io.ctrl.fun === ALU_SLT)   -> (io.alu_op1.asSInt < io.alu_op2.asSInt).asUInt,
-    (io.ctrl.fun === ALU_SLTU)  -> (io.alu_op1 < io.alu_op2).asUInt,
-    (io.ctrl.fun === ALU_SLL)   -> (io.alu_op1 << alu_shamt)(conf.xprlen-1, 0).asUInt,
-    (io.ctrl.fun === ALU_SRA)   -> (io.alu_op1.asSInt >> alu_shamt).asUInt,
-    (io.ctrl.fun === ALU_SRL)   -> (io.alu_op1 >> alu_shamt).asUInt,
-    (io.ctrl.fun === ALU_COPY_1)->  io.alu_op1,
-    (io.ctrl.fun === ALU_COPY_2)->  io.alu_op2))
+    (io.ctrl.fun === ALU_SUB)   -> (io.op1 - io.op2).asUInt,
+    (io.ctrl.fun === ALU_AND)   -> (io.op1 & io.op2).asUInt,
+    (io.ctrl.fun === ALU_OR)    -> (io.op1 | io.op2).asUInt,
+    (io.ctrl.fun === ALU_XOR)   -> (io.op1 ^ io.op2).asUInt,
+    (io.ctrl.fun === ALU_SLT)   -> (io.op1.asSInt < io.op2.asSInt).asUInt,
+    (io.ctrl.fun === ALU_SLTU)  -> (io.op1 < io.op2).asUInt,
+    (io.ctrl.fun === ALU_SLL)   -> (io.op1 << alu_shamt)(conf.xprlen-1, 0).asUInt,
+    (io.ctrl.fun === ALU_SRA)   -> (io.op1.asSInt >> alu_shamt).asUInt,
+    (io.ctrl.fun === ALU_SRL)   -> (io.op1 >> alu_shamt).asUInt,
+    (io.ctrl.fun === ALU_COPY_1)->  io.op1,
+    (io.ctrl.fun === ALU_COPY_2)->  io.op2))
 
   // Branch/Jump Target Calculation
-  io.target.brjmp    := io.pc + io.alu_op2
+  io.target.brjmp    := io.pc + io.op2
   io.target.jpreg    := Cat(add_result(conf.xprlen-1,1), 0.U(1.W))
   io.target.conti    := io.pc + 4.U  // FIXME: can forward if_pc_plus4 for time saver
-  io.alu_result      := Mux(io.ctrl.wb_sel === WB_PC4, io.target.conti, result)
+  io.result      := Mux(io.ctrl.wb_sel === WB_PC4, io.target.conti, result)
 
-  val br_eq: Bool  = io.alu_op1 === io.rs2_data
-  val br_lt: Bool  = io.alu_op1.asSInt < io.rs2_data.asSInt
-  val br_ltu: Bool = io.alu_op1.asUInt < io.rs2_data.asUInt
+  val br_eq: Bool  = io.op1 === io.rs2_data
+  val br_lt: Bool  = io.op1.asSInt < io.rs2_data.asSInt
+  val br_ltu: Bool = io.op1.asUInt < io.rs2_data.asUInt
 
   // Branch Logic
   io.ctrl.pc_sel :=
@@ -71,5 +70,4 @@ class ALU(implicit conf: CPUConfig) extends Module {
     Mux(io.ctrl.br_type === BR_J  , PC_BRJMP,
     Mux(io.ctrl.br_type === BR_JR , PC_JALR,
     PC_4 )))))))))
-
 }
