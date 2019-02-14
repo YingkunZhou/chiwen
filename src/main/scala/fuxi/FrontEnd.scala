@@ -23,14 +23,14 @@ class FrontEnd(implicit conf: CPUConfig) extends Module with BTBParams {
           Mux(io.back.xcpt.valid, io.back.xcpt.bits,
           Mux(io.back.dec_kill,   io.back.feedBack.target,
           Mux(io.back.if_kill,    ras.io.peek,
-          Mux(btb.io.split,  btb.io.predict(0).Tg,
-          /*predictor*/      btb.io.predict(1).Tg))))
+          Mux(btb.io.split,       btb.io.predict(0).Tg,
+          /*predictor*/           btb.io.predict(1).Tg))))
   } else {
-    val if_pc_plus: UInt = if_reg_pc + conf.pcInc.asUInt(conf.xprlen.W)
+    val if_pc_plus: UInt = if_reg_pc + 8.asUInt(conf.xprlen.W)
     if_pc_next :=
           Mux(io.back.xcpt.valid, io.back.xcpt.bits,
           Mux(io.back.dec_kill,   io.back.feedBack.target,
-                             if_pc_plus))
+                                  if_pc_plus))
   }
 
   when (fetchi.io.pc_forward) { if_reg_pc := if_pc_next }

@@ -339,7 +339,7 @@ class BackEnd(implicit conf: CPUConfig) extends Module with BTBParams {
   io.front.forward  := !stall.asUInt.orR
 
   // Printout
-  printf("Core: Cyc= %d WB[ %x %x: 0x%x] (0x%x, 0x%x, 0x%x, 0x%x) %c %c %c ExeInst: DASM(%x)\n"
+  printf("Core: Cyc= %d WB[ %x %x: 0x%x] (0x%x, 0x%x, 0x%x) %c %c %c ExeInst: DASM(%x)\n"
     , io.cyc
     , wb_wire.rf_wen
     , wb.wbaddr
@@ -347,7 +347,6 @@ class BackEnd(implicit conf: CPUConfig) extends Module with BTBParams {
     , io.front.pc
     , exe.pc
     , mem.pc
-    , RegNext(mem.pc)
     , Mux(stall(Stage.MEM), Str("F"),             //FREEZE-> F
       Mux(stall(Stage.DEC), Str("S"), Str(" ")))  //STALL->S
     , Mux(alu.ctrl.pc_sel === 1.U, Str("B"),    //BJ -> B

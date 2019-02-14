@@ -38,13 +38,13 @@ class CaheCore(val wLines: Int, val wOffset: Int, val wTag: Int, val num: Int)(i
   val tag_ctx  = io.addr(conf.xprlen-1, conf.xprlen-wTag)
   val off_idx  = io.addr(conf.pcLSB+wLines+wOffset-1, conf.pcLSB+wLines)
 
-  val rdata = Wire(Vec(nLine, UInt(conf.xprlen.W)))
+  val rdata = Wire(Vec(nLine, UInt((num * conf.xprlen).W)))
   // TODO: it is write after read, read data is the old value
   for(i <- 0 until nLine) {
     data_RAMs(i).addr  := off_idx
     data_RAMs(i).wen   := io.wen
     if (num == 1)   data_RAMs(i).wdata := io.wdata(i)
-    else/*num == 2*/data_RAMs(i).wdata := Cat(io.wdata(2*i), io.wdata(2*i+1))
+    else/*num == 2*/data_RAMs(i).wdata := Cat(io.wdata(2*i+1), io.wdata(2*i))
     rdata(i) := data_RAMs(i).rdata
   }
 

@@ -17,10 +17,8 @@ trait ICCParams { // FIXME: the last two bits of pc must be 00
 }
 
 class CoreIO(val data_width: Int) extends Bundle {
-  val pc        = Input(UInt(data_width.W))
-  val pc_valid  = Input(Bool())
-  val inst      = Output(Vec(2, UInt(data_width.W)))
-  val inst_valid= Output(Vec(2, Bool()))
+  val pc        = Input(Valid(UInt(data_width.W)))
+  val inst      = Output(Vec(2, Valid(UInt(data_width.W))))
   val ready     = Output(Bool())
 }
 
@@ -79,9 +77,9 @@ class Icache(implicit conf: CPUConfig) extends Module with ICCParams {
 
   val pc_valid = RegInit(false.B) // pulse signal
   val pc = Reg(UInt(conf.xprlen.W))
-  val pc_accept: Bool = io.core.ready && io.core.pc_valid
+  val pc_accept: Bool = io.core.ready && io.core.pc.valid
   pc_valid := pc_accept
-  when (pc_accept) { pc := io.core.pc } // Notice: if io.core.pc is invalid then pc is unchageable
+  when (pc_accept) { pc := io.core.pc.bits } // Notice: if io.core.pc is invalid then pc is unchageable
   val sLookUp :: sBurst :: sWriteBack :: Nil = Enum(3)
   val state = RegInit(sLookUp)
 
@@ -89,7 +87,7 @@ class Icache(implicit conf: CPUConfig) extends Module with ICCParams {
   val wb_addr = Reg(UInt((conf.xprlen - wLine - conf.pcLSB).W))
   val icache = Module(new CaheCore(wLines = wLine, wOffset = wOffset, wTag = wTAG, num = 2))
   icache.io.wen     := state === sWriteBack
-  icache.io.addr    := Mux(state === sWriteBack, Cat(wb_addr, 0.U((conf.pcLSB + wLine).W)), io.core.pc)
+  icache.io.addr    := Mux(state === sWriteBack, Cat(wb_addr, 0.U((conf.pcLSB + wLine).W)), io.core.pc.bits)
   icache.io.wdata   := wb_buffer
   icache.io.wstatus := state === sWriteBack
 
@@ -156,20 +154,24 @@ class Icache(implicit conf: CPUConfig) extends Module with ICCParams {
     line_idx(i)           := Cat(pc(conf.pcLSB+wLine-1, conf.pcLSB+1), i.U(1.W))
     buffer_inst(i)        := Mux(line_hit, wb_buffer(line_idx(i)), icache_inst(i))
     buf_inst_valid(i)     := ShakeHand(wait_inst_back, wb_buf_valid(line_idx(i)) && line_hit) || cache_hit
-    io.core.inst(i)       := Mux(state === sLookUp, icache_inst(i), buffer_inst(i))
-    io.core.inst_valid(i) := Mux(state === sLookUp, cache_hit, buf_inst_valid(i))
+    io.core.inst(i).bits  := Mux(state === sLookUp, icache_inst(i), buffer_inst(i))
   }
 
-//  when (io.cyc === 171.U) {
-//    printf("Icache: state = %c inst = %x valid = %x back = %x bk_val = %x\n"
-//      , MuxCase(Str("L"), Array(
-//        (state === sBurst) -> Str("B"),
-//        (state === sWriteBack) -> Str("W")
-//      ))
-//      , io.core.inst
-//      , io.core.inst_valid
-//      , io.axi.r.data
-//      , io.axi.r.valid
-//    )
-//  }
+  io.core.inst(0).valid := Mux(state === sLookUp, cache_hit, buf_inst_valid(0)) && !pc(conf.pcLSB).toBool
+  io.core.inst(1).valid := Mux(state === sLookUp, cache_hit, buf_inst_valid(1))
+
+  when (io.cyc === 197.U) {
+    printf("Icache: state = %c %x pc = %x [inst %x %x] [valid %x %x]\n"
+      , MuxCase(Str("L"), Array(
+        (state === sBurst) -> Str("B"),
+        (state === sWriteBack) -> Str("W")
+      ))
+      , cache_hit
+      , pc
+      , io.core.inst(0).bits
+      , io.core.inst(1).bits
+      , io.core.inst(0).valid
+      , io.core.inst(1).valid
+    )
+  }
 }

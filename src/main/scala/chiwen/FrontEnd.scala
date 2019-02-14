@@ -25,7 +25,7 @@ class FrontEnd (implicit conf: CPUConfig) extends Module with BTBParams {
       Mux(io.back.if_kill,    ras.io.peek,
       /*predictor*/           btb.io.predict.Tg)))
   } else {
-    val if_pc_plus: UInt = if_reg_pc + conf.pcInc.asUInt(conf.xprlen.W)
+    val if_pc_plus: UInt = if_reg_pc + 4.asUInt(conf.xprlen.W)
     if_pc_next :=
       Mux(io.back.xcpt.valid, io.back.xcpt.bits,
       Mux(io.back.dec_kill,   io.back.feedBack.target,

@@ -1,0 +1,26 @@
+[0m[[0m[31merror[0m] [0m[0m/home/albert/CPU/chiwen/src/main/scala/fuxi/BackEnd.scala:434:55: type mismatch;[0m
+[0m[[0m[31merror[0m] [0m[0m found   : Int[0m
+[0m[[0m[31merror[0m] [0m[0m required: chisel3.core.Bits[0m
+[0m[[0m[31merror[0m] [0m[0m      , Mux(stall(i)(Stage.MEM), Str("M"), Str(" ")), i[0m
+[0m[[0m[31merror[0m] [0m[0m                                                      ^[0m
+[0m[[0m[31merror[0m] [0m[0m/home/albert/CPU/chiwen/src/main/scala/fuxi/BackEnd.scala:435:55: type mismatch;[0m
+[0m[[0m[31merror[0m] [0m[0m found   : Int[0m
+[0m[[0m[31merror[0m] [0m[0m required: chisel3.core.Bits[0m
+[0m[[0m[31merror[0m] [0m[0m      , Mux(stall(i)(Stage.EXE), Str("E"), Str(" ")), i[0m
+[0m[[0m[31merror[0m] [0m[0m                                                      ^[0m
+[0m[[0m[31merror[0m] [0m[0m/home/albert/CPU/chiwen/src/main/scala/fuxi/BackEnd.scala:436:55: type mismatch;[0m
+[0m[[0m[31merror[0m] [0m[0m found   : Int[0m
+[0m[[0m[31merror[0m] [0m[0m required: chisel3.core.Bits[0m
+[0m[[0m[31merror[0m] [0m[0m      , Mux(stall(i)(Stage.DEC), Str("D"), Str(" ")), i[0m
+[0m[[0m[31merror[0m] [0m[0m                                                      ^[0m
+[0m[[0m[31merror[0m] [0m[0m/home/albert/CPU/chiwen/src/main/scala/fuxi/BackEnd.scala:440:65: type mismatch;[0m
+[0m[[0m[31merror[0m] [0m[0m found   : Int[0m
+[0m[[0m[31merror[0m] [0m[0m required: chisel3.core.Bits[0m
+[0m[[0m[31merror[0m] [0m[0m        Mux(alu(i).ctrl.pc_sel === 0.U, Str(" "), Str("?"))))), i[0m
+[0m[[0m[31merror[0m] [0m[0m                                                                ^[0m
+[0m[[0m[31merror[0m] [0m[0m/home/albert/CPU/chiwen/src/main/scala/fuxi/BackEnd.scala:441:50: type mismatch;[0m
+[0m[[0m[31merror[0m] [0m[0m found   : Int[0m
+[0m[[0m[31merror[0m] [0m[0m required: chisel3.core.Bits[0m
+[0m[[0m[31merror[0m] [0m[0m      , Mux(csr.io.illegal, Str("X"), Str(" ")), i[0m
+[0m[[0m[31merror[0m] [0m[0m                                                 ^[0m
+[0m[[0m[31merror[0m] [0m[0m5 errors found[0m

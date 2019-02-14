@@ -82,7 +82,9 @@ class BTB(implicit conf: CPUConfig) extends Module with BTBParams {
   * 2. if it is branch, then use brjump, but need to check take or not
   * 3. if it is jump, then use brjump
   * */
-  val pc_plus: UInt = io.pc + conf.pcInc.U(conf.xprlen.W)
+  val pc_plus = Wire(Vec(2, UInt(conf.xprlen.W)))
+  pc_plus(0) := Cat(io.pc(conf.xprlen-1, conf.pcLSB+1), 1.U(1.W), 0.U(conf.pcLSB.W))
+  pc_plus(1) := pc_plus(0) + 4.U(conf.xprlen.W)
   val pc_cands = Wire(Vec(2, Vec(CFIType.NUM, UInt(conf.xprlen.W))))
   io.split := !(cfiType(0) === CFIType.invalid.U || cfiType(0) === CFIType.branch.U && hcnt(0)(1) === 0.U) && !io.pc(OFF_LSB).toBool
   for (i <- 0 until 2) {
@@ -94,7 +96,7 @@ class BTB(implicit conf: CPUConfig) extends Module with BTBParams {
     hcnt(i)       := Mux1H(off_sel(i), hcnts)
     brjmp(i)      := Cat(tg_page, tg_offset(i), 0.U(OFF_LSB.W))
 
-    pc_cands(i)(CFIType.invalid) := pc_plus
+    pc_cands(i)(CFIType.invalid) := pc_plus(i)
     pc_cands(i)(CFIType.retn)    := io.peekRAS
     pc_cands(i)(CFIType.jump)    := brjmp(i)
     pc_cands(i)(CFIType.branch)  := brjmp(i)

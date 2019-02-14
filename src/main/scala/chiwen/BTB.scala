@@ -83,7 +83,7 @@ class BTB(implicit conf: CPUConfig) extends Module with BTBParams {
   * 3. if it is jump, then use brjump
   * */
   val pc_cands = Wire(Vec(CFIType.NUM, UInt(conf.xprlen.W)))
-  val pc_plus: UInt = io.pc + conf.pcInc.U(conf.xprlen.W)
+  val pc_plus: UInt = io.pc + 4.U(conf.xprlen.W)
   pc_offset  := io.pc(OFF_MSB, OFF_LSB)
   off_matches:= pc_offsets.map(_ === pc_offset)
   off_sel    := off_matches.asUInt & idx_matches.asUInt & off_valids.asUInt
