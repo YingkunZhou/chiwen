@@ -5,7 +5,7 @@ import chisel3.util._
 import common.CPUConfig
 
 trait BTBParams {
-  val nEntries: Int = 32
+  val nEntries: Int = 64
   val nPages  : Int = 4
   val nRAS    : Int = 8
   val OFF_MSB : Int = 13
@@ -142,11 +142,12 @@ class BTB(implicit conf: CPUConfig) extends Module with BTBParams {
   val off_valids_N: UInt = (~off_valids.asUInt).asUInt /*| pg_idx_matches.asUInt*/ // for time conside otherwise it is linear
   val off_insert: Bool = off_valids_N.orR
   val new_off_idx = PriorityEncoder(off_valids_N)
-  require(nEntries == 32)
-  val lfsr5 = RegInit(1.U(log2Ceil(nEntries).W))
-  lfsr5 := Cat(lfsr5(log2Ceil(nEntries)-2,0), lfsr5(4)^lfsr5(2))
-  val off_idx = Mux(off_insert, new_off_idx, lfsr5)
-
+  require(nEntries == 64)
+  val lfsr6 = RegInit(32.U(log2Ceil(nEntries).W))
+//  lfsr5 := Cat(lfsr5(log2Ceil(nEntries)-2,0), lfsr5(4)^lfsr5(2))
+//  val off_idx = Mux(off_insert, new_off_idx, lfsr5)
+    lfsr6 := Cat(lfsr6(1)^lfsr6(0), lfsr6(log2Ceil(nEntries)-1,1))
+    val off_idx = Mux(off_insert, new_off_idx, lfsr6)
   /*
   * 1. offset insert, page insert
   * 2. offset insert, page replace
