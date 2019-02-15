@@ -401,7 +401,7 @@ class DatPath(implicit val conf: CPUConfig) extends Module
    io.dmem.req.bits.data := mem_reg_rs2_data
 
   // Printout
-  printf("Core: Cyc= %d WB[ %x %x: 0x%x] (0x%x, 0x%x, 0x%x, 0x%x) %c %c %c ExeInst: DASM(%x)\n"
+  printf("Core: Cyc= %d WB[ %x %x %x] (%x, %x, %x) %c %c %c ExeInst: DASM(%x)\n"
     , csr.io.time(31,0)
     , wb_reg_ctrl_rf_wen
     , wb_reg_wbaddr
@@ -409,7 +409,6 @@ class DatPath(implicit val conf: CPUConfig) extends Module
     , dec_reg_pc
     , exe_reg_pc
     , mem_reg_pc
-    , RegNext(mem_reg_pc)
     , Mux(io.ctl.mem_stall, Str("F"),             //FREEZE-> F
       Mux(io.ctl.dec_stall, Str("S"), Str(" ")))  //STALL->S
     , Mux(io.ctl.exe_pc_sel === 1.U, Str("B"),    //BJ -> B

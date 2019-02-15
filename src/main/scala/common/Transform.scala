@@ -64,26 +64,22 @@ class Transform(implicit conf: CPUConfig) extends Module {
     io.inner.ar.ready      := Latch(lfsr5 > 12.U && lfsr5 < 18.U, cnt(2).toBool)
     io.inner.r.last        := valid_cnt === 15.U
     io.inner.r.data        := io.outer.resp.bits.data
-
-    //    when(io.cyc === 171.U) {
-    //      printf("Transform: valid = %x addr = %x inst = %x\n", io.outer.req.valid, io.outer.req.bits.addr, io.outer.resp.bits.data)
-    //    }
+    if (conf.use_cc) io.inner.r.id := conf.iccRd
+    else io.inner.r.id := conf.incRd
   }
   else {
     io.outer.req.valid     := io.inner.ar.valid
     io.outer.req.bits.addr := io.inner.ar.addr
-    io.inner.ar.ready := io.outer.req.ready
-    io.inner.r.valid  := RegNext(io.outer.resp.valid && io.inner.ar.ready)
-    io.inner.r.data   := RegNext(io.outer.resp.bits.data)
-    io.inner.r.last  := DontCare
+    io.inner.ar.ready      := io.outer.req.ready
+    io.inner.r.valid       := RegNext(io.outer.resp.valid && io.inner.ar.ready)
+    io.inner.r.data        := RegNext(io.outer.resp.bits.data)
+    io.inner.r.last        := DontCare
+    io.inner.r.id          := conf.incRd
   }
-
 
   io.outer.req.bits.fcn  := M_XRD
   io.outer.req.bits.typ  := MT_WU
   io.outer.req.bits.data := DontCare
-
-  io.inner.r.id    := conf.iccRd
 }
 
 class SimpleTrans(implicit conf: CPUConfig) extends Module {

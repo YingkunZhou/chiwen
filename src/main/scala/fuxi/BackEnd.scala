@@ -317,8 +317,10 @@ class BackEnd(implicit conf: CPUConfig) extends Module with BTBParams {
     mem_wire(i).csr_cmd := Mux(mem_valid(i), mem(i).csr_cmd, CSR.N)
     mem_wire(i).illegal := mem(i).illegal && mem_valid(i)
 
-    mem_sel(i) := mem_wire(i).csr_cmd =/= CSR.N || mem_wire(i).mem_en
-
+    mem_sel(i) := mem_wire(i).csr_cmd =/= CSR.N ||
+                  mem_wire(i).mem_en ||
+                  mem_wire(i).illegal ||
+                  mem_reg_jpnpc(i)(1,0).orR
     // WB Mux
     mem_wbdata(i) := MuxCase(mem_reg_exe_out(i), Array( // default is wb_alu and wb_pc4
       // (mem_reg_wb_sel === WB_ALU) -> mem_reg_alu_out,
@@ -326,28 +328,33 @@ class BackEnd(implicit conf: CPUConfig) extends Module with BTBParams {
       (mem(i).wb_sel === WB_MEM) -> io.mem.resp.bits.data,
       (mem(i).wb_sel === WB_CSR) -> csr.io.rw.rdata))
 
-    when (stall(i)(Stage.MEM) || xcpt.valid) {
-      wb_valid(i) := false.B
-    } .otherwise {
-      wb_valid(i) := mem_valid(i)
-      wb(i).rf_wen := mem(i).rf_wen
-      wb(i).wbaddr := mem(i).wbaddr
-      wb_wbdata(i) := mem_wbdata(i)
-    }
+    wb_valid(i) := mem_valid(i)
+    wb(i).rf_wen := mem(i).rf_wen
+    wb(i).wbaddr := mem(i).wbaddr
+    wb_wbdata(i) := mem_wbdata(i)
   }
-  val xcpt_conflict: Bool = mem_valid(0) && (mem_wire(1).illegal || mem_reg_jpnpc(1)(1,0).orR)
-  val mem_0: Bool =  mem_sel(0) || xcpt_conflict
 
-  val mem_inst     = Mux(mem_0, mem(0).inst, mem(1).inst)
-  val mem_exe_out  = Mux(mem_0, mem_reg_exe_out(0), mem_reg_exe_out(1))
-  val mem_csr_cmd  = Mux(mem_0, mem_wire(0).csr_cmd, mem_wire(1).csr_cmd)
-  val mem_pc       = Mux(mem_0, mem(0).pc, mem(1).pc)
-  val mem_illegal  = Mux(mem_0, mem_wire(0).illegal, mem_wire(1).illegal)
-  val mem_jpnpc    = Mux(mem_0, mem_reg_jpnpc(0), mem_reg_jpnpc(1))
-  val mem_en       = Mux(mem_0, mem_wire(0).mem_en, mem_wire(1).mem_en)
-  val mem_fcn      = Mux(mem_0, mem(0).mem_fcn, mem(1).mem_fcn)
-  val mem_typ      = Mux(mem_0, mem(0).mem_typ, mem(1).mem_typ)
-  val mem_rs2_data = Mux(mem_0, mem(0).rs2_data, mem(1).rs2_data)
+  when (stall(0)(Stage.MEM) || (xcpt.valid && mem_sel(0))) {
+    wb_valid(0) := false.B
+  } .otherwise { wb_valid(0) := mem_valid(0) }
+
+  when (stall(1)(Stage.MEM) || xcpt.valid) {
+    wb_valid(1) := false.B
+  } .otherwise { wb_valid(1) := mem_valid(1) }
+  when(io.cyc === 136.U) {
+    printf(p"Debug: ${io.cyc} wb_valid $wb_valid")
+  }
+
+  val mem_inst     = Mux(mem_sel(0), mem(0).inst, mem(1).inst)
+  val mem_exe_out  = Mux(mem_sel(0), mem_reg_exe_out(0), mem_reg_exe_out(1))
+  val mem_csr_cmd  = Mux(mem_sel(0), mem_wire(0).csr_cmd, mem_wire(1).csr_cmd)
+  val mem_pc       = Mux(mem_sel(0), mem(0).pc, mem(1).pc)
+  val mem_illegal  = Mux(mem_sel(0), mem_wire(0).illegal, mem_wire(1).illegal)
+  val mem_jpnpc    = Mux(mem_sel(0), mem_reg_jpnpc(0), mem_reg_jpnpc(1))
+  val mem_en       = Mux(mem_sel(0), mem_wire(0).mem_en, mem_wire(1).mem_en)
+  val mem_fcn      = Mux(mem_sel(0), mem(0).mem_fcn, mem(1).mem_fcn)
+  val mem_typ      = Mux(mem_sel(0), mem(0).mem_typ, mem(1).mem_typ)
+  val mem_rs2_data = Mux(mem_sel(0), mem(0).rs2_data, mem(1).rs2_data)
   // Control Status Registers
   csr.io := DontCare
   csr.io.rw.addr  := mem_inst(CSR_ADDR_MSB,CSR_ADDR_LSB)
@@ -363,7 +370,7 @@ class BackEnd(implicit conf: CPUConfig) extends Module with BTBParams {
   val ma_jump: Bool    = mem_jpnpc(1,0).orR
   val ma_load: Bool    = mem_en && mem_fcn === M_XRD && ls_addr_ma_valid
   val ma_store: Bool   = mem_en && mem_fcn === M_XWR && ls_addr_ma_valid
-  val ma_illegal: Bool = Mux(mem_0, mem_wire(0).illegal, mem_wire(1).illegal)
+  val ma_illegal: Bool = Mux(mem_sel(0), mem_wire(0).illegal, mem_wire(1).illegal)
   csr.io.xcpt  := ma_load || ma_store || ma_jump || mem_illegal
   csr.io.cause := MuxCase(0.U, Array(
     ma_jump    -> Causes.misaligned_fetch.U,
@@ -429,8 +436,11 @@ class BackEnd(implicit conf: CPUConfig) extends Module with BTBParams {
 
   stall(0)(Stage.EXE) := false.B
   stall(1)(Stage.EXE) := exe_sel.asUInt.andR || stall(0)(Stage.EXE)
-  stall(0)(Stage.MEM) := mem_en && !io.mem.resp.valid
-  stall(1)(Stage.MEM) := xcpt_conflict || mem_sel.asUInt.andR || stall(0)(Stage.MEM)
+  stall(0)(Stage.MEM) := mem_wire(0).mem_en && !io.mem.resp.valid
+  stall(1)(Stage.MEM) := mem_sel.asUInt.andR || (mem_wire(0).mem_en || mem_wire(1).mem_en) && !io.mem.resp.valid
+  when (io.cyc === 135.U) {
+    printf(p"Debug: ${io.cyc} mem_en $mem_en mem_sel $mem_sel valid ${io.mem.resp.valid} mem_valid $mem_valid\n")
+  }
 
   io.front.dec_kill := Pulse(dec_mispredict, forward = !stall(1)(Stage.MEM)) || xcpt.valid
   io.front.if_kill  := Pulse(if_mispredict || dec_mispredict, forward = !stall(1)(Stage.MEM)) || xcpt.valid
@@ -439,7 +449,7 @@ class BackEnd(implicit conf: CPUConfig) extends Module with BTBParams {
 
   // Printout
   for (i <- 0 until 2) {
-    printf("Core: Cyc= %d WB[ %x %x: 0x%x] (0x%x, 0x%x, 0x%x) [stall %c%c %c%c %c%c] %c%c %c%c Exe: DASM(%x)\n"
+    printf("Core: Cyc= %d WB[ %x %x %x] (%x, %x, %x) [%c%c %c%c %c%c] %c%c %c%c Exe: DASM(%x)\n"
       , io.cyc
       , wb_wire(i).rf_wen
       , wb(i).wbaddr
