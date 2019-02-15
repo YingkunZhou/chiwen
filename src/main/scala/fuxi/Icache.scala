@@ -160,18 +160,18 @@ class Icache(implicit conf: CPUConfig) extends Module with ICCParams {
   io.core.inst(0).valid := Mux(state === sLookUp, cache_hit, buf_inst_valid(0)) && !pc(conf.pcLSB).toBool
   io.core.inst(1).valid := Mux(state === sLookUp, cache_hit, buf_inst_valid(1))
 
-  when (io.cyc === 197.U) {
-    printf("Icache: state = %c %x pc = %x [inst %x %x] [valid %x %x]\n"
-      , MuxCase(Str("L"), Array(
-        (state === sBurst) -> Str("B"),
-        (state === sWriteBack) -> Str("W")
-      ))
-      , cache_hit
-      , pc
-      , io.core.inst(0).bits
-      , io.core.inst(1).bits
-      , io.core.inst(0).valid
-      , io.core.inst(1).valid
-    )
-  }
+//  when (io.cyc === 14227.U) {
+//    printf("Icache: state = %c %x pc = %x [inst %x %x] [valid %x %x]\n"
+//      , MuxCase(Str("L"), Array(
+//        (state === sBurst) -> Str("B"),
+//        (state === sWriteBack) -> Str("W")
+//      ))
+//      , cache_hit
+//      , pc
+//      , io.core.inst(0).bits
+//      , io.core.inst(1).bits
+//      , io.core.inst(0).valid
+//      , io.core.inst(1).valid
+//    )
+//  }
 }

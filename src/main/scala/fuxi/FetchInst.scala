@@ -105,18 +105,16 @@ class FetchInst(implicit conf: CPUConfig) extends Module with BTBParams {
   pc_valid := state === sWtAddrOK || !io.if_kill && ((state === sWtForward && io.forward) ||
     (state === sWtInstOK  && valid_orR && (io.forward || inst_kill || next_odd)))
 
-  when(pc_valid) {
-    inst_odd    := pc(conf.pcLSB)
-    inst_split  := io.pc_split
-  }
-
   val reg_pred = Reg(Vec(2, new Predict(conf.xprlen)))
   val reg_pc   = RegInit(VecInit(Seq.fill(2)(START_ADDR)))
   when (pc_valid) {
+    inst_odd      := pc_odd || io.pc(conf.pcLSB)
     when (io.pc(conf.pcLSB).toBool) {
+      inst_split  := false.B
       reg_pc(1)   := io.pc
       reg_pred(1) := io.if_btb(1)
     }.elsewhen(!pc_odd) {
+      inst_split    := io.pc_split
       for (i <- 0 until 2) {
         reg_pred(i) := io.if_btb(i)
         reg_pc(i)   := Cat(io.pc(conf.xprlen-1, conf.pcLSB+1), i.U(1.W), 0.U(conf.pcLSB.W))
@@ -135,44 +133,22 @@ class FetchInst(implicit conf: CPUConfig) extends Module with BTBParams {
     io.inst(i).bits := LatchData(inst_valid(i), inst(i), BUBBLE)
   }
 
-  when (io.cyc >= 142.U && io.cyc <= 145.U) {
-    printf("FetchInst: state = %c pc = %x io.pc = %x [inst %x %x] [valid %x %x] inst_kill %x forward %x pc_fwd %x\n"
-      , MuxCase(Str("A"), Array(
-          (state === sWtInstOK) -> Str("I"),
-          (state === sWtForward) -> Str("F")
-        ))
-      , pc
-      , io.pc
-      , io.inst(0).bits
-      , io.inst(1).bits
-      , io.inst(0).valid
-      , io.inst(1).valid
-      , inst_kill
-      , io.forward
-      , io.pc_forward
-    )
-    printf(p"FetchiInst: wtForward = $state_WtForward\n")
-  }
-
-when (io.cyc === 142.U) {
-  printf(p"DEBUG: inst_valid ${inst_valid} inst_kill ${inst_kill} if_kill ${io.if_kill}\n")
-}
-  //  printf("%c, pc = %x, valid = %x, frwd = %x, redirect = %x, inst = %x, valid = %x, frwd = %x, dec_pc = %x, memReady = %x, memValid = %x\n"
-  //    , MuxCase(Str("A"), Array(
-  //      (state === sWtInstOK) -> Str("I"),
-  //      (state === sWtForward) -> Str("F")
-  //    ))
-  //    ,io.pc
-  //    ,pc_valid
-  //    ,io.pc_forward
-  //    ,io.redirect
-  //    ,io.inst
-  //    ,io.inst_valid
-  //    ,io.forward
-  //    ,io.dec_pc
-  ////    ,addr_ready
-  //    ,io.mem.r.id
-  ////    ,inst_valid
-  //    ,io.mem.r.valid
-  //  )
+//  when (io.cyc === 14227.U) {
+//    printf("FetchInst: state = %c pc = %x io.pc = %x [inst %x %x] [valid %x %x] inst_kill %x forward %x pc_fwd %x\n"
+//      , MuxCase(Str("A"), Array(
+//          (state === sWtInstOK) -> Str("I"),
+//          (state === sWtForward) -> Str("F")
+//        ))
+//      , pc
+//      , io.pc
+//      , io.inst(0).bits
+//      , io.inst(1).bits
+//      , io.inst(0).valid
+//      , io.inst(1).valid
+//      , inst_kill
+//      , io.forward
+//      , io.pc_forward
+//    )
+//    printf(p"DEBUG: inst_valid ${inst_valid} inst_split ${inst_split} dec_kill ${io.dec_kill} btb_tg = ${Hexadecimal(io.dec_btb(0).Tg)} btb_tp = ${io.dec_btb(0).Tp}\n")
+//  }
 }

@@ -112,13 +112,13 @@ class BackEnd(implicit conf: CPUConfig) extends Module with BTBParams {
   val regfile = Module(new Regfile())
   val rf_rs1_data = Wire(Vec(2, UInt()))
   val rf_rs2_data = Wire(Vec(2, UInt()))
-  val pc_wrong    = Wire(Vec(2, Bool()))
-  val if_mispredict = Wire(Bool())
-  val dec_stall = Wire(Vec(2, Bool()))
-  val dec_mask0 = RegInit(true.B)
+  val pc_wrong    = Wire(Vec(2, Bool()))   // Inner signal
+  val dec_pc_wrong= Wire(Bool()) // Outer signal
+  val dec_stall1  = Wire(Bool())
+  val dec_mask0   = RegInit(true.B)
   when (!stall(0)(Stage.DEC) && !stall(1)(Stage.EXE) && !stall(1)(Stage.MEM)) {
-    when (!dec_stall(1))     { dec_mask0 := true.B
-    }.elsewhen(dec_stall(1)) { dec_mask0 := false.B }
+    when (!dec_stall1)     { dec_mask0 := true.B
+    }.elsewhen(dec_stall1) { dec_mask0 := false.B }
   }
 
   dec_valid(0) := io.front.inst(0).valid && dec_mask0
@@ -192,30 +192,30 @@ class BackEnd(implicit conf: CPUConfig) extends Module with BTBParams {
       exe(i).jump     := dec(i).cinfo.cfi_jump
       exe(i).btb.Tp   := io.front.pred(i).Tp
       exe(i).btb.Sel  := io.front.pred(i).Sel
-      exe(i).btb.Tg   := Mux(if_mispredict, io.front.rasIO.peek, io.front.pred(i).Tg)
+      exe(i).btb.Tg   := Mux(pc_wrong(i), io.front.rasIO.peek, io.front.pred(i).Tg)
     }
   }
+  val exe_pc_wrong = Wire(Vec(2, Bool()))
+  val exe_kill = Wire(Vec(2, Bool()))
+  exe_kill(0) := xcpt.valid || (exe_pc_wrong(0) && !exe_wire(0).rf_wen) // have no result to write
+  exe_kill(1) := xcpt.valid || (exe_pc_wrong(1) && !exe_wire(1).rf_wen) || exe_pc_wrong(0)
 
-  when (((stall(0)(Stage.DEC) || stall(1)(Stage.EXE)) && !stall(0)(Stage.EXE) && !stall(1)(Stage.MEM)) || io.front.dec_kill) {
+  when (((stall(0)(Stage.DEC) || stall(1)(Stage.EXE)) && !stall(0)(Stage.EXE) && !stall(1)(Stage.MEM)) || exe_kill(0)) {
     exe_valid(0) := false.B
   }.elsewhen(!stall(1)(Stage.EXE) && !stall(1)(Stage.MEM)) {
     exe_valid(0) := dec_valid(0)
   }
-
-  when ((stall(1)(Stage.DEC) && !stall(1)(Stage.EXE) && !stall(1)(Stage.MEM)) || io.front.dec_kill) {
+  when ((stall(1)(Stage.DEC) && !stall(1)(Stage.EXE) && !stall(1)(Stage.MEM)) || exe_kill(1)) {
     exe_valid(1) := false.B
   }.elsewhen(!stall(1)(Stage.EXE) && !stall(1)(Stage.MEM)) {
     exe_valid(1) := dec_valid(1) && !pc_wrong(0)
   }
-  when (io.cyc === 143.U || io.cyc === 142.U) {
-    printf(p"what exe_valid??? $exe_valid\n")
-  }
-  if_mispredict := pc_wrong.asUInt.orR
+
+  dec_pc_wrong := Pulse(pc_wrong.asUInt.orR, forward = !stall(1)(Stage.EXE) && !stall(1)(Stage.MEM))
   // Execute Stage ==========================================================================================================================================
   //=========================================================================================================================================================
   val alu      = Array.fill(2)(Module(new ALU()).io)
   val fb_tg    = Wire(Vec(2, UInt(conf.xprlen.W)))
-  val pc_right = Wire(Vec(2, Bool()))
   val exe_sel  = Wire(Vec(2, Bool()))
   val mem_reg_exe_out = Reg(Vec(2, UInt(conf.xprlen.W)))
   val mem_reg_jpnpc   = RegInit(VecInit(Seq.fill(2)(0.U(conf.xprlen.W))))
@@ -230,9 +230,9 @@ class BackEnd(implicit conf: CPUConfig) extends Module with BTBParams {
     exe_wire(i).btbTp   := Mux(exe_valid(i), exe(i).btb.Tp, CFIType.invalid.U)
     exe_wire(i).illegal := exe(i).illegal && exe_valid(i)
 
-    alu(i).op1      := exe(i).op1_data
-    alu(i).op2      := exe(i).op2_data
-    alu(i).pc       := exe(i).pc
+    alu(i).op1          := exe(i).op1_data
+    alu(i).op2          := exe(i).op2_data
+    alu(i).pc           := exe(i).pc
     alu(i).rs2_data     := exe(i).rs2_data
     alu(i).ctrl.fun     := exe(i).alu_fun
     alu(i).ctrl.br_type := exe_wire(i).br_type
@@ -242,7 +242,9 @@ class BackEnd(implicit conf: CPUConfig) extends Module with BTBParams {
     fb_tg(i) := Mux(alu(i).ctrl.pc_sel === PC_BRJMP, alu(i).target.brjmp,
                 Mux(alu(i).ctrl.pc_sel === PC_JALR,  alu(i).target.jpreg,
                                                      alu(i).target.conti))
-    pc_right(i) := fb_tg(i) === exe(i).btb.Tg || !exe_valid(i)
+
+    exe_pc_wrong(i) := Pulse(fb_tg(i) =/= exe(i).btb.Tg && exe_valid(i), forward = !stall(1)(Stage.MEM))
+
     exe_sel(i) := exe_wire(i).br_type =/= BR_N || exe_wire(i).btbTp =/= CFIType.invalid.U
 
     when (!stall(1)(Stage.MEM)) {
@@ -276,7 +278,7 @@ class BackEnd(implicit conf: CPUConfig) extends Module with BTBParams {
     mem_valid(1)    := false.B
     mem_reg_jpnpc(1):= 0.U
   } .elsewhen (!stall(1)(Stage.MEM)) {
-    mem_valid(1) := exe_valid(1) && pc_right(0)
+    mem_valid(1) := exe_valid(1) && !exe_pc_wrong(0)
     mem_reg_jpnpc(1) := exe_wire_jpnpc(1)
   }
 
@@ -306,8 +308,6 @@ class BackEnd(implicit conf: CPUConfig) extends Module with BTBParams {
     )))
 
   io.front.feedBack.target := Mux(exe_sel(0), fb_tg(0), fb_tg(1))
-
-  val dec_mispredict: Bool = !pc_right.asUInt.andR
   // Memory Stage ============================================================================================================================================
   //==========================================================================================================================================================
   val mem_sel = Wire(Vec(2, Bool()))
@@ -341,9 +341,6 @@ class BackEnd(implicit conf: CPUConfig) extends Module with BTBParams {
   when (stall(1)(Stage.MEM) || xcpt.valid) {
     wb_valid(1) := false.B
   } .otherwise { wb_valid(1) := mem_valid(1) }
-  when(io.cyc === 136.U) {
-    printf(p"Debug: ${io.cyc} wb_valid $wb_valid")
-  }
 
   val mem_inst     = Mux(mem_sel(0), mem(0).inst, mem(1).inst)
   val mem_exe_out  = Mux(mem_sel(0), mem_reg_exe_out(0), mem_reg_exe_out(1))
@@ -400,6 +397,7 @@ class BackEnd(implicit conf: CPUConfig) extends Module with BTBParams {
     wb_wire(i).rf_wen   := wb(i).rf_wen && wb_valid(i) && wb(i).wbaddr =/= 0.U
     regfile.io.waddr(i) := wb(i).wbaddr
     regfile.io.wdata(i) := wb_wbdata(i)
+    regfile.io.wdata(i) := wb_wbdata(i)
     regfile.io.wen(i)   := wb_wire(i).rf_wen
   }
 
@@ -426,24 +424,20 @@ class BackEnd(implicit conf: CPUConfig) extends Module with BTBParams {
       (exe(1).wbaddr === dec(i).rs2_addr && rs2_addr_N0(i) && dec_wire(i).rs2_oen && exe_load_inst(1))
   }
 
-  dec_stall(0) := rAW(0) || exe_wire(0).csr_cmd =/= CSR.N || exe_wire(1).csr_cmd =/= CSR.N
-  stall(0)(Stage.DEC) := dec_stall(0)
+  stall(0)(Stage.DEC) := rAW(0) || exe_wire(0).csr_cmd =/= CSR.N || exe_wire(1).csr_cmd =/= CSR.N
 
-  dec_stall(1) := (dec(0).wbaddr === dec(1).rs1_addr && rs1_addr_N0(1) && dec_wire(1).rs1_oen && dec_wire(0).rf_wen) ||
-                  (dec(0).wbaddr === dec(1).rs2_addr && rs2_addr_N0(1) && dec_wire(1).rs2_oen && dec_wire(0).rf_wen) ||
-                   dec_wire(0).csr_cmd =/= CSR.N || rAW(1)
-  stall(1)(Stage.DEC) := dec_stall.asUInt.orR
+  dec_stall1 := (dec(0).wbaddr === dec(1).rs1_addr && rs1_addr_N0(1) && dec_wire(1).rs1_oen && dec_wire(0).rf_wen) ||
+                (dec(0).wbaddr === dec(1).rs2_addr && rs2_addr_N0(1) && dec_wire(1).rs2_oen && dec_wire(0).rf_wen) ||
+                 dec_wire(0).csr_cmd =/= CSR.N || rAW(1)
+  stall(1)(Stage.DEC) := dec_stall1 || stall(0)(Stage.DEC)
 
   stall(0)(Stage.EXE) := false.B
   stall(1)(Stage.EXE) := exe_sel.asUInt.andR || stall(0)(Stage.EXE)
   stall(0)(Stage.MEM) := mem_wire(0).mem_en && !io.mem.resp.valid
   stall(1)(Stage.MEM) := mem_sel.asUInt.andR || (mem_wire(0).mem_en || mem_wire(1).mem_en) && !io.mem.resp.valid
-  when (io.cyc === 135.U) {
-    printf(p"Debug: ${io.cyc} mem_en $mem_en mem_sel $mem_sel valid ${io.mem.resp.valid} mem_valid $mem_valid\n")
-  }
 
-  io.front.dec_kill := Pulse(dec_mispredict, forward = !stall(1)(Stage.MEM)) || xcpt.valid
-  io.front.if_kill  := Pulse(if_mispredict || dec_mispredict, forward = !stall(1)(Stage.MEM)) || xcpt.valid
+  io.front.dec_kill := exe_pc_wrong.asUInt.orR || xcpt.valid
+  io.front.if_kill  := dec_pc_wrong || io.front.dec_kill
   io.front.xcpt     := xcpt
   io.front.forward  := !stall(1).asUInt.orR
 
@@ -453,7 +447,7 @@ class BackEnd(implicit conf: CPUConfig) extends Module with BTBParams {
       , io.cyc
       , wb_wire(i).rf_wen
       , wb(i).wbaddr
-      , wb_wbdata(i)
+      , regfile.io.wdata(i)
       , io.front.pc(i)
       , exe(i).pc
       , mem(i).pc
@@ -465,7 +459,10 @@ class BackEnd(implicit conf: CPUConfig) extends Module with BTBParams {
         Mux(alu(i).ctrl.pc_sel === 3.U, Str("E"),    //EX -> E
         Mux(alu(i).ctrl.pc_sel === 0.U, Str(" "), Str("?"))))), Str(""+i)
       , Mux(csr.io.illegal, Str("X"), Str(" ")), Str(""+i)
-      , Mux(xcpt.valid || !exe_valid(i) || (!pc_right(0) && i.U === 1.U) || stall(1)(Stage.MEM), BUBBLE, exe(i).inst)
+      , Mux(!exe_valid(i) || (exe_kill(i) && (!exe_pc_wrong(i)||exe_wire(i).rf_wen)) || stall(1)(Stage.MEM), BUBBLE, exe(i).inst)
     )
   }
+  //  when (io.cyc === 14228.U || io.cyc === 14229.U) {
+  //    printf(p"Debug: ${io.cyc} exe_valid $exe_valid\n")
+  //  }
 }
