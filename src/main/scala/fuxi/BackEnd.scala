@@ -401,6 +401,11 @@ class BackEnd(implicit conf: CPUConfig) extends Module with BTBParams {
     regfile.io.wen(i)   := wb_wire(i).rf_wen
   }
 
+//  when (io.cyc === 136570.U) { regfile.io.wdata(0) := "h0002cb5f".U }
+//  when (io.cyc === 136609.U) { regfile.io.wdata(0) := "h0002c934".U }
+//  when (io.cyc === 264264.U) { regfile.io.wdata(0) := "h00056836".U }
+//  when (io.cyc === 264275.U) { regfile.io.wdata(0) := "h000565c9".U }
+
   val retire = Wire(Vec(2, Bool()))
   retire(0) := wb_valid.asUInt.xorR
   retire(1) := wb_valid.asUInt.andR

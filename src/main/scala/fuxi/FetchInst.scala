@@ -107,17 +107,14 @@ class FetchInst(implicit conf: CPUConfig) extends Module with BTBParams {
 
   val reg_pred = Reg(Vec(2, new Predict(conf.xprlen)))
   val reg_pc   = RegInit(VecInit(Seq.fill(2)(START_ADDR)))
+  val pc_wire_odd: Bool = pc_odd || io.pc(conf.pcLSB).toBool
   when (pc_valid) {
-    inst_odd      := pc_odd || io.pc(conf.pcLSB)
-    when (io.pc(conf.pcLSB).toBool) {
-      inst_split  := false.B
-      reg_pc(1)   := io.pc
-      reg_pred(1) := io.if_btb(1)
-    }.elsewhen(!pc_odd) {
-      inst_split    := io.pc_split
+    inst_odd   :=  pc_wire_odd
+    inst_split := !pc_wire_odd && io.pc_split
+    when (!pc_odd) {
       for (i <- 0 until 2) {
+        reg_pc(i) := Cat(io.pc(conf.xprlen-1, conf.pcLSB+1), i.U(1.W), 0.U(conf.pcLSB.W))
         reg_pred(i) := io.if_btb(i)
-        reg_pc(i)   := Cat(io.pc(conf.xprlen-1, conf.pcLSB+1), i.U(1.W), 0.U(conf.pcLSB.W))
       }
     }
   }
@@ -133,7 +130,7 @@ class FetchInst(implicit conf: CPUConfig) extends Module with BTBParams {
     io.inst(i).bits := LatchData(inst_valid(i), inst(i), BUBBLE)
   }
 
-//  when (io.cyc === 14227.U) {
+//  when (io.cyc >= 276783.U && io.cyc <= 276785.U) {
 //    printf("FetchInst: state = %c pc = %x io.pc = %x [inst %x %x] [valid %x %x] inst_kill %x forward %x pc_fwd %x\n"
 //      , MuxCase(Str("A"), Array(
 //          (state === sWtInstOK) -> Str("I"),
@@ -149,6 +146,6 @@ class FetchInst(implicit conf: CPUConfig) extends Module with BTBParams {
 //      , io.forward
 //      , io.pc_forward
 //    )
-//    printf(p"DEBUG: inst_valid ${inst_valid} inst_split ${inst_split} dec_kill ${io.dec_kill} btb_tg = ${Hexadecimal(io.dec_btb(0).Tg)} btb_tp = ${io.dec_btb(0).Tp}\n")
+//    printf(p"DEBUG: inst_valid $inst_valid inst_split $inst_split dec_kill ${io.dec_kill} btb_tg = ${Hexadecimal(io.dec_btb(0).Tg)} btb_tp = ${io.dec_btb(0).Tp}\n")
 //  }
 }
