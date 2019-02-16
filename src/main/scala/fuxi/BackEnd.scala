@@ -203,12 +203,12 @@ class BackEnd(implicit conf: CPUConfig) extends Module with BTBParams {
   when (((stall(0)(Stage.DEC) || stall(1)(Stage.EXE)) && !stall(0)(Stage.EXE) && !stall(1)(Stage.MEM)) || exe_kill(0)) {
     exe_valid(0) := false.B
   }.elsewhen(!stall(1)(Stage.EXE) && !stall(1)(Stage.MEM)) {
-    exe_valid(0) := dec_valid(0)
+    exe_valid(0) := dec_valid(0) && !exe_pc_wrong.asUInt.orR
   }
   when ((stall(1)(Stage.DEC) && !stall(1)(Stage.EXE) && !stall(1)(Stage.MEM)) || exe_kill(1)) {
     exe_valid(1) := false.B
   }.elsewhen(!stall(1)(Stage.EXE) && !stall(1)(Stage.MEM)) {
-    exe_valid(1) := dec_valid(1) && !pc_wrong(0)
+    exe_valid(1) := dec_valid(1) && !exe_pc_wrong.asUInt.orR && !pc_wrong(0)
   }
 
   dec_pc_wrong := Pulse(pc_wrong.asUInt.orR, forward = !stall(1)(Stage.EXE) && !stall(1)(Stage.MEM))
@@ -401,10 +401,10 @@ class BackEnd(implicit conf: CPUConfig) extends Module with BTBParams {
     regfile.io.wen(i)   := wb_wire(i).rf_wen
   }
 
-//  when (io.cyc === 136570.U) { regfile.io.wdata(0) := "h0002cb5f".U }
-//  when (io.cyc === 136609.U) { regfile.io.wdata(0) := "h0002c934".U }
-//  when (io.cyc === 264264.U) { regfile.io.wdata(0) := "h00056836".U }
-//  when (io.cyc === 264275.U) { regfile.io.wdata(0) := "h000565c9".U }
+//  when (io.cyc === 5197.U) { regfile.io.wdata(0) := "h00001631".U }
+//  when (io.cyc === 10037.U) { regfile.io.wdata(0) := "h00002ad8".U }
+//  when (io.cyc === 5226.U) { regfile.io.wdata(0) := "h000010cc".U }
+//  when (io.cyc === 10048.U) { regfile.io.wdata(0) := "h0000210a".U }
 
   val retire = Wire(Vec(2, Bool()))
   retire(0) := wb_valid.asUInt.xorR

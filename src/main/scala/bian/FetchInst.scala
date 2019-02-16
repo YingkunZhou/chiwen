@@ -1,4 +1,4 @@
-package fuxi
+package bian
 
 import chisel3._
 import chisel3.util._
@@ -130,7 +130,7 @@ class FetchInst(implicit conf: CPUConfig) extends Module with BTBParams {
     io.inst(i).bits := LatchData(inst_valid(i), inst(i), BUBBLE)
   }
 
-//  when (io.cyc >= 132.U && io.cyc <= 134.U) {
+//  when (io.cyc >= 276783.U && io.cyc <= 276785.U) {
 //    printf("FetchInst: state = %c pc = %x io.pc = %x [inst %x %x] [valid %x %x] inst_kill %x forward %x pc_fwd %x\n"
 //      , MuxCase(Str("A"), Array(
 //          (state === sWtInstOK) -> Str("I"),
@@ -146,6 +146,6 @@ class FetchInst(implicit conf: CPUConfig) extends Module with BTBParams {
 //      , io.forward
 //      , io.pc_forward
 //    )
-//    printf(p"DEBUG: inst_valid $inst_valid inst_split $inst_split dec_kill ${io.dec_kill} btb_tg = ${Hexadecimal(io.dec_btb(1).Tg)} btb_tp = ${io.dec_btb(1).Tp}\n")
+//    printf(p"DEBUG: inst_valid $inst_valid inst_split $inst_split dec_kill ${io.dec_kill} btb_tg = ${Hexadecimal(io.dec_btb(0).Tg)} btb_tp = ${io.dec_btb(0).Tp}\n")
 //  }
 }
