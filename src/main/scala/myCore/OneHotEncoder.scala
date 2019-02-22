@@ -1,14 +1,14 @@
 package myCore
 
 import chisel3._
-import chisel3.util.log2Ceil
+import chisel3.util.{PriorityEncoderOH, log2Ceil}
 
 class OneHotEncoder(val w: Int) extends Module {
   val io = IO(new Bundle {
-    val in = Input(Vec(w, Bool()))
-    val out = Output(UInt(log2Ceil(w).W))
+    val in = Input(UInt(w.W))
+    val out = Output(Bool())
   })
-
-  io.out := io.in.indices.map(i => VecInit(Seq.fill(log2Ceil(w)){ io.in(i) }).asUInt() & i.U).reduce(_ | _)
-//  printf(p"result = ${io.out}\n")
+  val n = 7.U((w-1).W)
+  io.out := io.in > n
+  printf(p"result = ${io.out}\n")
 }

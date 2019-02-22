@@ -1,78 +1,77 @@
 package bian
 
 import chisel3._
-import chisel3.util._
 import common._
 
-object Stage {
-  val DEC = 0
-  val EXE = 1
-  val MEM = 2
-  val Num: Int = MEM + 1
-}
-
-class WbCrtl extends Bundle {
-  val rf_wen = Bool()
-}
-
-class MemCrtl extends WbCrtl {
-  val mem_en   = Bool()
-  val csr_cmd  = UInt(CSR.SZ)
-  val illegal  = Bool()
-}
-
-class ExeCrtl extends MemCrtl {
-  val br_type  = UInt(BR_N.getWidth.W)
-  val branch   = Bool()
-  val jump     = UInt(Jump.NUM.W)
-  val btbTp    = UInt(CFIType.SZ.W)
-}
-
-class DecCrtl extends WbCrtl {
-  val jump    = UInt(Jump.NUM.W)
-  val branch  = Bool()
-  val btbTp   = UInt(CFIType.SZ.W)
-  val rs1_oen = Bool()
-  val rs2_oen = Bool()
-  val csr_cmd = UInt(CSR.SZ)
-}
-
-class Wb extends Bundle {
-  val rf_wen = Bool()
-  val wbaddr = UInt(5.W)
-}
-
-class Mem(implicit val conf: CPUConfig) extends Wb {
-  val mem_en   = Bool()
-  val csr_cmd  = UInt(CSR.SZ)
-  val illegal  = Bool()
-  val pc       = UInt(conf.xprlen.W)
-  val inst     = UInt(conf.xprlen.W)
-  val rs2_data = UInt(conf.xprlen.W)
-  val wb_sel   = UInt(WB_X.getWidth.W)
-  val mem_fcn  = UInt(M_X.getWidth.W)
-  val mem_typ  = UInt(MT_X.getWidth.W)
-}
-
-class Exe(val nEntries : Int)(implicit conf: CPUConfig) extends Mem {
-  val br_type  = UInt(BR_N.getWidth.W)
-  val branch   = Bool()
-  val jump     = UInt(Jump.NUM.W)
-  val btb      = new Predict(conf.xprlen)
-  val op1_data = UInt(conf.xprlen.W)
-  val op2_data = UInt(conf.xprlen.W)
-  val alu_fun  = UInt(ALU_X.getWidth.W)
-}
-
-object Pulse {
-  def apply(in: Bool, forward: Bool): Bool = {
-    val in_latch = RegInit(true.B)
-    when (forward) { in_latch := true.B
-    }.elsewhen(in) { in_latch := false.B}
-    in && in_latch
-  }
-}
-
+//object Stage {
+//  val DEC = 0
+//  val EXE = 1
+//  val MEM = 2
+//  val Num: Int = MEM + 1
+//}
+//
+//class WbCrtl extends Bundle {
+//  val rf_wen = Bool()
+//}
+//
+//class MemCrtl extends WbCrtl {
+//  val mem_en   = Bool()
+//  val csr_cmd  = UInt(CSR.SZ)
+//  val illegal  = Bool()
+//}
+//
+//class ExeCrtl extends MemCrtl {
+//  val br_type  = UInt(BR_N.getWidth.W)
+//  val branch   = Bool()
+//  val jump     = UInt(Jump.NUM.W)
+//  val btbTp    = UInt(CFIType.SZ.W)
+//}
+//
+//class DecCrtl extends WbCrtl {
+//  val jump    = UInt(Jump.NUM.W)
+//  val branch  = Bool()
+//  val btbTp   = UInt(CFIType.SZ.W)
+//  val rs1_oen = Bool()
+//  val rs2_oen = Bool()
+//  val csr_cmd = UInt(CSR.SZ)
+//}
+//
+//class Wb extends Bundle {
+//  val rf_wen = Bool()
+//  val wbaddr = UInt(5.W)
+//}
+//
+//class Mem(implicit val conf: CPUConfig) extends Wb {
+//  val mem_en   = Bool()
+//  val csr_cmd  = UInt(CSR.SZ)
+//  val illegal  = Bool()
+//  val pc       = UInt(conf.xprlen.W)
+//  val inst     = UInt(conf.xprlen.W)
+//  val rs2_data = UInt(conf.xprlen.W)
+//  val wb_sel   = UInt(WB_X.getWidth.W)
+//  val mem_fcn  = UInt(M_X.getWidth.W)
+//  val mem_typ  = UInt(MT_X.getWidth.W)
+//}
+//
+//class Exe(val nEntries : Int)(implicit conf: CPUConfig) extends Mem {
+//  val br_type  = UInt(BR_N.getWidth.W)
+//  val branch   = Bool()
+//  val jump     = UInt(Jump.NUM.W)
+//  val btb      = new Predict(conf.xprlen)
+//  val op1_data = UInt(conf.xprlen.W)
+//  val op2_data = UInt(conf.xprlen.W)
+//  val alu_fun  = UInt(ALU_X.getWidth.W)
+//}
+//
+//object Pulse {
+//  def apply(in: Bool, forward: Bool): Bool = {
+//    val in_latch = RegInit(true.B)
+//    when (forward) { in_latch := true.B
+//    }.elsewhen(in) { in_latch := false.B}
+//    in && in_latch
+//  }
+//}
+//
 class BackEnd(implicit conf: CPUConfig) extends Module with BTBParams {
   val io = IO(new Bundle {
     val mem  = new MemPortIo(conf.xprlen)
@@ -82,6 +81,16 @@ class BackEnd(implicit conf: CPUConfig) extends Module with BTBParams {
 
   val csr = Module(new CSRFile())
   io.cyc := csr.io.time(conf.xprlen-1,0)
+
+
+//  val issueQueue = Array.fill(2)(Module(new IssueQueue).io)
+//  val snoop = Wire(Vec(nInst, Vec(2, Bool())))
+//  io.front.forward   := instQueue.io.forward
+//  instQueue.io.winst := io.front.inst
+//  instQueue.io.rinst <> stateCtrl.io.inst
+//  for (i <- 0 until nInst) {
+//    issueQueue(i).wissue <> stateCtrl.io.issue(i)
+//  }
 
 
   // Decode Stage ===========================================================================================================================================

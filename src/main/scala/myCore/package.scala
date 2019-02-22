@@ -1,1 +1,1 @@
-package object myCore extends chiwen.ScalarOpConstants with common.RISCVConstants with common.MemoryOpConstants
+package object myCore extends ScalarOpConstants with common.RISCVConstants with common.MemoryOpConstants

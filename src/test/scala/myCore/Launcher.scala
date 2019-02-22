@@ -14,7 +14,7 @@ object Launcher {
       }
     },
     "Encoder" -> { manager: TesterOptionsManager =>
-      Driver.execute(() => new OneHotEncoder(16), manager) {
+      Driver.execute(() => new OneHotEncoder(4), manager) {
         c => new EncoderTest(c)
       }
     },
@@ -28,9 +28,9 @@ object Launcher {
         c => new LRUTest(c)
       }
     },
-    "Predictor" -> {manager: TesterOptionsManager =>
-      Driver.execute(() => new Predictor, manager) {
-        c => new PredTest(c)
+    "State" -> {manager: TesterOptionsManager =>
+      Driver.execute(() => new StateCtrl(conf.xprlen), manager) {
+        c => new StateTest(c)
       }
     },
     "Ccore" -> {manager: TesterOptionsManager =>
