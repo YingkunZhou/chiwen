@@ -1,0 +1,5 @@
+package myCore
+
+class IssueBuffer {
+
+}
