@@ -1,5 +1,5 @@
 package myCore
 
-class LsQueue {
+class LoadStore {
 
 }
