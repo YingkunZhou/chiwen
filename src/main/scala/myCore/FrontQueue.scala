@@ -10,6 +10,7 @@ trait Pram {
   require(isPow2(nPhyAddr))
   require(isPow2(nOrder))
   val wPhyAddr = log2Ceil(nPhyAddr)
+  val wPhyCnt  = log2Ceil(nPhyAddr+1)
   val wOrder   = log2Ceil(nOrder)
   val nCommit  = 4
   val nBrchjr  = 4
@@ -27,6 +28,10 @@ class FrontInfo(implicit val conf: CPUConfig) extends Bundle {
   val valid = Bool()
   val inst  = UInt(conf.inst_width.W)
   val pc    = UInt(conf.data_width.W)
+}
+
+class FrontTotal(implicit conf: CPUConfig) extends FrontInfo {
+  val pred = new Predict(conf.data_width)
 }
 
 class FrontBuffer(val nEntry: Int)
@@ -54,10 +59,9 @@ class FrontQueue(implicit val conf: CPUConfig) extends Module with FrontParam {
     val dec_bj  = Input(Vec(nInst, Bool())) //from dec stage
     val cancel  = Input(Valid(new RePredict(conf.data_width))) //rename stage(just after dec stage) cancels dec stage
     val ready   = Input(Vec(nInst, Bool()))
-    val in  = Input(Vec(nInst, new FrontInfo))
+    val in  = Input(Vec(nInst, new FrontTotal))
     val out = Output(Vec(nInst, new FrontInfo))
-    val predin  = Input(Vec(nInst, new Predict(conf.data_width)))
-    val predout = Output(new Predict(conf.data_width))
+    val pred = Output(new Predict(conf.data_width))
   })
 
   def next(ptr: UInt, nEntry: Int): UInt = {
@@ -136,8 +140,8 @@ class FrontQueue(implicit val conf: CPUConfig) extends Module with FrontParam {
       }
     }
     when (empty) {
-      when (dec_bj(0))      { reg_pred := io.predin(0)
-      }.elsewhen(dec_bj(1)) { reg_pred := io.predin(1) }
+      when (dec_bj(0))      { reg_pred := io.in(0).pred
+      }.elsewhen(dec_bj(1)) { reg_pred := io.in(1).pred }
     }.otherwise{ reg_pred := preds(ptr(head))  }
   }
 
@@ -147,8 +151,8 @@ class FrontQueue(implicit val conf: CPUConfig) extends Module with FrontParam {
   preds(prev_tail).tgt := io.cancel.bits.tgt //the jump addr, TODO: only for branch not for jalr
 
   when (ptrInc(tail)) {
-    when (dec_bj(0)) { preds(ptr(tail)) := io.predin(0)
-    }.elsewhen(dec_bj(1)) { preds(ptr(tail)) := io.predin(1) }
+    when (dec_bj(0)) { preds(ptr(tail)) := io.in(0).pred
+    }.elsewhen(dec_bj(1)) { preds(ptr(tail)) := io.in(1).pred }
     sel_0 := dec_bj(0)
   }
   when (io.cancel.valid) {
@@ -171,7 +175,7 @@ class FrontQueue(implicit val conf: CPUConfig) extends Module with FrontParam {
     io.out(i).valid := reg_front(i).valid
   }
 
-  io.predout := reg_pred
+  io.pred := reg_pred
 
   ptrInc(head) := pump && !empty
   ptrInc(tail) := dec_valid.reduce(_||_) && !io.cancel.valid && ((empty && !pump) || (full  &&  pump) || (!full && !empty))

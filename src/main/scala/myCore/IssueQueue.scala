@@ -1,124 +1,129 @@
 package myCore
+
 import chisel3._
 import chisel3.util._
 
-class Info(val data_width: Int) extends Bundle {
-  val op = new InnerOp
-  val pc = UInt(data_width.W)
-  val imm = UInt(12.W)
+trait IssueBufParam {
+  val nEntry = 8
+  val wEntry = log2Ceil(nEntry)
+  val wCount = log2Ceil(nEntry+1)
 }
 
-class InfoPlus(data_width: Int) extends Info(data_width) {
-  val imm_l = UInt(8.W)
-  val imm_z = UInt(5.W)
+class ExeIssue(val addr_width: Int, val id_width: Int, val data_width: Int) extends Bundle {
+  val id   = UInt(id_width.W)
+  val rd   = new ByPass(addr_width)
+  val f1   = Bool()
+  val mem_en = Bool()
+  val data = Vec(2, UInt(data_width.W))
 }
 
-class Issue(val addr_width: Int, val id_width: Int) extends Bundle {
-  val id = UInt(id_width.W)
-  val rs = Vec(2, Valid(UInt(addr_width.W)))
-  val rd = Valid(UInt(addr_width.W))
-  val fix1 = Bool()
-}
-
-class InfoIssue (addr_width: Int, id_width: Int, val data_width: Int) extends Issue(addr_width, id_width) {
-  val info = new InfoPlus(data_width)
-}
-
-class IssueQueue(val data_width: Int) extends Module with Pram {
-  val io = IO(new Bundle{
-    val in  = Flipped(Decoupled(new InfoIssue(wPhyAddr, wOrder, data_width)))
-    val out = Decoupled(new InfoIssue(wPhyAddr, wOrder, data_width))
-    val bypass  = Input(Vec(2*nCommit, Valid(UInt(wPhyAddr.W))))
-    val forward = Output(Valid(UInt(wPhyAddr.W)))
-    val counter = Output(UInt(wCount.W))
-    val issueID = Output(UInt(wOrder.W))
-    val issueInfo = Input(new Info(data_width))
+class IssueQueue(data_width: Int) extends Module with Pram with IssueBufParam {
+  val io = IO(new Bundle {
+    val in = Flipped(Decoupled(new ExeIssue(wPhyAddr, wOrder, data_width)))
+    val rsdata = Input(Vec(2, UInt(data_width.W)))
+    val rsaddr = Input(Vec(2, new ByPass(wPhyAddr)))
+    val bypass = Input(Vec(nCommit, new ByPass(wPhyAddr)))
+    val bydata = Input(Vec(nCommit, UInt(data_width.W)))
+    val forward= Output(new ByPass(wPhyAddr))
+    val forward_id = Output(UInt(wOrder.W)) // to access inst code
+    val issue  = Output(Valid(new ExeIssue(wPhyAddr, wOrder, data_width)))
+    val mem_en = Output(Bool())
   })
 
-  val reg_issue   = Reg(new Issue(wPhyAddr, wOrder))
-  val issue_valid = RegInit(false.B)
+  val bydata = Reg(Vec(nCommit, UInt(data_width.W)))
+  val bypass = Reg(Vec(nCommit, new ByPass(wPhyAddr)))
+  bydata := io.bydata
+  bypass := io.bypass
 
-  val wire_rs_valid = Wire(Vec(2, Bool()))
-  val reg_rs_valid  = Wire(Vec(2, Bool()))
-  for (i <- 0 until 2) {
-    wire_rs_valid(i) := (0 until nCommit).map(j =>
-      io.bypass(j).bits === io.in.bits.rs(i).bits && io.bypass(j).valid).reduce(_||_)  || io.in.bits.rs(i).valid
-    reg_rs_valid(i) := (0 until nCommit).map(j =>
-      io.bypass(j).bits === reg_issue.rs(i).bits && io.bypass(j).valid).reduce(_||_)   || reg_issue.rs(i).valid
-  }
+  val queue = Reg(Vec(nEntry, new F1Issue(wPhyAddr, wOrder)))
+  val tidxs = Reg(Vec(nEntry, UInt(wEntry.W)))
+  val lsacc = Reg(Vec(nEntry, Bool()))
 
-  io.forward.bits  := reg_issue.rd.bits
-  io.forward.valid := reg_issue.rd.valid && reg_issue.fix1 && reg_rs_valid(0) && reg_rs_valid(1)
+  val count = RegInit(0.U(wCount.W))
 
-  io.out.valid := issue_valid || io.in.valid
-  val wire_issue = Wire(new Issue(wPhyAddr, wOrder))
-  io.out.bits.id  := Mux(issue_valid, reg_issue.id, io.in.bits.id)
-  io.out.bits.rd  := Mux(issue_valid, reg_issue.rd, io.in.bits.rd)
-  io.out.bits.fix1:= Mux(issue_valid, reg_issue.fix1, io.in.bits.fix1)
-  io.out.bits.rs  := Mux(issue_valid, reg_issue.rs, wire_issue.rs)
-  io.out.bits.info.imm_z := io.in.bits.info.imm_z
-  io.out.bits.info.imm_l := Mux(issue_valid, Cat(reg_issue.rs(1).bits(7-wPhyAddr, 0), reg_issue.rs(0).bits), io.in.bits.info.imm_l)
-  io.out.bits.info.op := Mux(issue_valid, io.issueInfo.op, io.in.bits.info.op)
-  io.out.bits.info.pc := Mux(issue_valid, io.issueInfo.pc, io.in.bits.info.pc)
-  io.out.bits.info.imm := Mux(issue_valid, io.issueInfo.imm, io.in.bits.info.imm)
-  val long_imm: Bool = io.in.bits.info.op.op2_sel === OP2_UJTYPE || io.in.bits.info.op.op2_sel === OP2_UTYPE
-  wire_issue.rd := io.in.bits.rd
-  wire_issue.id := io.in.bits.id
-  wire_issue.fix1 := io.in.bits.fix1
-  wire_issue.rs(0).bits := Mux(long_imm, io.in.bits.info.imm_l(wPhyAddr-1,0), io.in.bits.rs(0).bits)
-  wire_issue.rs(1).bits := Mux(long_imm, Cat(Fill(2*wPhyAddr-8, 0.U(1.W)), io.in.bits.info.imm_l(7, wPhyAddr)), io.in.bits.rs(1).bits)
-  wire_issue.rs(0).valid := wire_rs_valid(0)
-  wire_issue.rs(1).valid := wire_rs_valid(1)
+  val rdata = Reg(Vec(nEntry, Vec(2, UInt(data_width.W))))
+  val raddr = Reg(Vec(nEntry, Vec(2, UInt(wPhyAddr.W))))
+  val tbval = RegInit(0.U(nEntry.W))
 
-  val instQueue   = Reg(Vec(nEntry, new Issue(wPhyAddr, wOrder)))
-  val counter     = RegInit(0.U(wCount.W))
-  val head_snoop  = Wire(Vec(2, Bool()))
-  val snoop       = Wire(Vec(2, Vec(nEntry, Bool())))
-  val snoop_ready = Wire(Vec(nEntry, Bool()))
-  val ready_ptr   = Wire(UInt(log2Ceil(nEntry).W))
-  val forwd_ptr   = Wire(UInt(log2Ceil(nEntry).W))
-  io.counter   := counter
-  io.in.ready  := counter =/= nEntry.U /*|| io.rissue.fire*/
-  when (!issue_valid || (io.out.fire && counter === 0.U)) {
-    reg_issue  := wire_issue
-    issue_valid := io.in.valid
-  }.elsewhen(io.out.fire) {
-    reg_issue  := instQueue(forwd_ptr)
-    issue_valid := true.B
-  }
 
-  for (j <- 0 until 2) {
-    snoop(j) := instQueue.map(inst => io.bypass.map(bypass =>
-      bypass.bits === inst.rs(j).bits && bypass.valid).reduce(_||_) || inst.rs(j).valid)
-  }
-  snoop_ready := (0 until nEntry).map(i => (0 until 2).map(j => snoop(j)(i)).reduce(_&&_))
+  val snoop = Wire(Vec(nEntry, Vec(2, Bool())))
+  val sdata = Wire(Vec(nEntry, Vec(2, UInt(data_width.W))))
 
-  ready_ptr := PriorityEncoder(snoop_ready)
-  forwd_ptr := Mux(snoop_ready.asUInt.orR && (ready_ptr < counter), ready_ptr, 0.U(log2Ceil(nEntry).W))
-
+  val ready_ptr = Wire(UInt(log2Ceil(nEntry).W))
+  val lsacc_ptr = Wire(UInt(log2Ceil(nEntry).W))
+  val ready_vec = snoop.map(_.reduce(_&&_))
+  val lsacc_vec = (0 until nEntry).map(i => (snoop(i).reduce(_&&_) && queue(i).mem_en) || (snoop(i)(0) && lsacc(i))) // just for addr ok
+  val ready_go = ready_vec.reduce(_||_) && ready_ptr < count
+  val lsacc_go = lsacc_vec.reduce(_||_) && lsacc_ptr < count
+  ready_ptr := PriorityEncoder(ready_vec)
+  lsacc_ptr := PriorityEncoder(lsacc_vec)
+  val forward_ptr = Mux(lsacc_go, lsacc_ptr, ready_ptr)
+  val issue_fire = ready_go || lsacc_go
   for (i <- 1 until nEntry) {
-    when (io.out.fire && forwd_ptr < i.U && i.U < counter) { //the very special case is that 0 < i.U < 1
+    when (ready_go && forward_ptr < i.U && i.U < count) {
       for (j <- 0 until 2) {
-        instQueue(i-1).rs(j).bits  := instQueue(i).rs(j).bits
-        instQueue(i-1).rs(j).valid := snoop(j)(i)
+        queue(i-1).rs(j).addr  := queue(i).rs(j).addr
+        queue(i-1).rs(j).valid := snoop(i)(j)
       }
-      instQueue(i-1).fix1 := instQueue(i).fix1
-      instQueue(i-1).id := instQueue(i).id
+      queue(i-1).id := queue(i).id
+      queue(i-1).rd := queue(i).rd
+      queue(i-1).f1 := queue(i).f1
+      tidxs(i-1) := tidxs(i)
     }
+    when (ready_go && forward_ptr < i.U && i.U < count) {
+      lsacc(i-1) := lsacc(i)
+    }.elsewhen(lsacc_go) { lsacc(lsacc_ptr) := false.B }
   }
 
- val counter_1: UInt = counter - 1.U
-  when (issue_valid) {
-    when (io.in.fire && io.out.fire) {
-      when (counter =/= 0.U) {
-        instQueue(counter_1) := wire_issue
-      }
-    }.elsewhen(io.in.fire) {
-      instQueue(counter)   := wire_issue
-      counter := counter + 1.U
-    }.elsewhen(io.out.fire && counter =/= 0.U) {
-      counter := counter_1
+  io.in.ready := (~tbval).asUInt.orR | ready_go
+  io.forward.addr  := queue(forward_ptr).rd.addr
+  io.forward.valid := queue(forward_ptr).rd.valid && queue(forward_ptr).f1 && ready_go
+  io.forward_id := queue(forward_ptr).id
+
+  def insert(cnt: UInt, idx: UInt): Unit = {
+    queue(cnt).f1     := io.in.bits.f1
+    queue(cnt).mem_en := io.in.bits.mem_en
+    queue(cnt).rd     := io.in.bits.rd
+    queue(cnt).id     := io.in.bits.id
+    queue(cnt).rs     := io.rsaddr
+    tidxs(cnt) := idx
+    lsacc(cnt) := io.in.bits.mem_en
+  }
+  // about count and tbval
+  val in_tidx   = Mux(ready_go, forward_ptr, PriorityEncoder(~tbval))
+  val in_set    = UIntToOH(in_tidx)
+  val out_reset = (~UIntToOH(forward_ptr)).asUInt
+
+  for (i <- 0 until nEntry) {
+    for (j <- 0 until 2) {
+      snoop(i)(j) := queue(i).rs(j).valid || bypass.map(by => by.addr === queue(i).rs(j).addr && by.valid).reduce(_||_)
+      sdata(i)(j) := Mux(bypass.map(by => by.addr =/= raddr(i)(j) || !by.valid).reduce(_&&_), rdata(i)(j),
+        (0 until nCommit).map(k => Fill(data_width, bypass(k).addr === raddr(i)(j)) & bydata(k)).reduce(_|_))
     }
+    when (io.in.fire && in_set(i) ) { rdata(in_tidx) := io.rsdata
+    }.otherwise { rdata(i) := sdata(i) }
   }
 
+  when (io.in.fire) { raddr(in_tidx) := io.rsaddr }
+
+  when (io.in.fire && ready_go) {
+    insert(count - 1.U, in_tidx)
+  }.elsewhen(io.in.fire) {
+    insert(count, in_tidx)
+    tbval := tbval | in_set
+    count := count + 1.U
+  }.elsewhen(ready_go) {
+    tbval := tbval & out_reset
+    count := count - 1.U
+  }
+
+  val forward_tid = tidxs(forward_ptr)
+  val issue = Reg(new ExeIssue(wPhyAddr, wOrder, data_width))
+  io.issue.bits:= issue
+  issue.id       := queue(forward_ptr).id
+  issue.rd       := queue(forward_ptr).rd
+  issue.f1       := queue(forward_ptr).f1
+  issue.mem_en   := queue(forward_ptr).mem_en
+  issue.data     := sdata(forward_tid)
+  io.issue.valid := RegNext(issue_fire)
 }
