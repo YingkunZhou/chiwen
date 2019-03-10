@@ -220,7 +220,7 @@ class BackEnd(implicit conf: CPUConfig) extends Module with BTBParams {
   val fb_tg =
     Mux(alu.ctrl.pc_sel === PC_BRJMP, alu.target.brjmp,
     Mux(alu.ctrl.pc_sel === PC_JALR,  alu.target.jpreg,
-                                         alu.target.conti
+                                      alu.target.conti
     ))
   io.front.feedBack.target := fb_tg
 
