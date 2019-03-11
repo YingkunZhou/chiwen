@@ -117,8 +117,7 @@ class BackEnd(implicit conf: CPUConfig) extends Module with BTBParams {
   val dec_stall1  = Wire(Bool())
   val dec_mask0   = RegInit(true.B)
   when (!stall(0)(Stage.DEC) && !stall(1)(Stage.EXE) && !stall(1)(Stage.MEM)) {
-    when (!dec_stall1)     { dec_mask0 := true.B
-    }.elsewhen(dec_stall1) { dec_mask0 := false.B }
+    dec_mask0 := !dec_stall1
   }
 
   dec_valid(0) := io.front.inst(0).valid && dec_mask0

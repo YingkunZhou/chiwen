@@ -149,6 +149,7 @@ class BackEnd(implicit conf: CPUConfig) extends Module with BTBParams {
     (dec.cinfo.op2_sel === OP2_UJTYPE) -> dec.dinfo.imm_uj))
 
   val if_mispredict = Wire(Bool())
+  val dec_mispredict = Wire(Bool())
   if (!conf.hasBTB) if_mispredict := false.B
   else if_mispredict := dec_wire.jump(Jump.pop) && (io.front.rasIO.peek =/= io.front.pred.Tg || dec_wire.btbTp =/= CFIType.retn.U)
 
@@ -156,7 +157,7 @@ class BackEnd(implicit conf: CPUConfig) extends Module with BTBParams {
     // (kill exe stage) insert NOP (bubble) into Execute stage on front-end stall (e.g., hazard clearing)
     exe_valid := false.B
   }.elsewhen(!stall(Stage.EXE) && !stall(Stage.MEM)) {
-    exe_valid    := dec_valid
+    exe_valid    := dec_valid && !dec_mispredict
     exe.rf_wen   := dec.cinfo.rf_wen
     exe.mem_en   := dec.cinfo.mem_en
     // convert CSR instructions with raddr1 == 0 to read-only CSR commands
@@ -224,7 +225,6 @@ class BackEnd(implicit conf: CPUConfig) extends Module with BTBParams {
     ))
   io.front.feedBack.target := fb_tg
 
-  val dec_mispredict = Wire(Bool())
   if (conf.hasBTB) dec_mispredict := fb_tg =/= exe.btb.Tg && exe_valid
   else dec_mispredict := alu.ctrl.pc_sel =/= PC_4
 
