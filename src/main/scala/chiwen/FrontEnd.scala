@@ -10,49 +10,66 @@ class FrontEnd (implicit conf: CPUConfig) extends Module with BTBParams {
     val back     = new InterfaceIO(conf.xprlen)
   })
 
-  val btb        = Module(new BTB())
-  val ras        = Module(new RAS(nRAS))
-  val fetchi     = Module(new FetchInst())
-  btb.io.cyc    := io.cyc
-  fetchi.io.cyc := io.cyc
+  val btb      = Module(new BTB()).io
+  val ras      = Module(new RAS(nRAS)).io
+  val fetchi   = Module(new FetchInst()).io
+  val microDec = Module(new MicroDecoder(conf.inst_width)).io
+  btb.cyc    := io.cyc
+  fetchi.cyc := io.cyc
+
+  val mispredict = Wire(Bool())
+  val if_kill = Pulse(mispredict, forward = io.back.forward)
 
   val if_reg_pc  = RegInit(START_ADDR)
   val if_pc_next = Wire(UInt(conf.xprlen.W))
   if (conf.hasBTB) {
     if_pc_next :=
       Mux(io.back.xcpt.valid, io.back.xcpt.bits,
-      Mux(io.back.dec_kill,   io.back.feedBack.target,
-      Mux(io.back.if_kill,    ras.io.peek,
-      /*predictor*/           btb.io.predict.Tg)))
+      Mux(io.back.kill,       io.back.feedBack.tgt,
+      Mux(if_kill,            ras.peek,
+      /*predictor*/           btb.predict.tgt)))
   } else {
     val if_pc_plus: UInt = if_reg_pc + 4.asUInt(conf.xprlen.W)
     if_pc_next :=
       Mux(io.back.xcpt.valid, io.back.xcpt.bits,
-      Mux(io.back.dec_kill,   io.back.feedBack.target,
+      Mux(io.back.kill,   io.back.feedBack.tgt,
       if_pc_plus))
   }
 
-  when (fetchi.io.pc_forward) { if_reg_pc := if_pc_next }
+  when (fetchi.pc_forward) { if_reg_pc := if_pc_next }
 
-  fetchi.io.mem      <> io.mem
-  fetchi.io.pc       := if_reg_pc
-  fetchi.io.if_btb   := btb.io.predict
-  fetchi.io.if_kill  := io.back.if_kill  || io.back.xcpt.valid
-  fetchi.io.dec_kill := io.back.dec_kill || io.back.xcpt.valid
-  fetchi.io.forward  := io.back.forward
+  fetchi.mem      <> io.mem
+  fetchi.pc       := if_reg_pc
+  fetchi.if_btb   := btb.predict
+  fetchi.if_kill  := io.back.kill || io.back.xcpt.valid || if_kill
+  fetchi.dec_kill := io.back.kill || io.back.xcpt.valid
+  fetchi.forward  := io.back.forward
+  microDec.inst   := fetchi.inst.bits
+  if (conf.hasBTB) mispredict := fetchi.inst.valid && microDec.jump(Jump.pop) &&
+    (ras.peek =/= fetchi.dec_btb.tgt || fetchi.dec_btb.typ =/= CFIType.retn.U || !fetchi.dec_btb.you)
+  else mispredict := false.B
 
-  io.back.inst := fetchi.io.inst
-  io.back.pc   := fetchi.io.dec_pc
-  io.back.pred := fetchi.io.dec_btb
+  io.back.inst := fetchi.inst
+  io.back.pc   := fetchi.dec_pc
+  io.back.jump := microDec.jump
+  io.back.pred.redirect := fetchi.dec_btb.redirect
+  io.back.pred.typ := fetchi.dec_btb.typ
+  io.back.pred.tgt := Mux(if_kill, ras.peek, fetchi.dec_btb.tgt)
+  io.back.pred.you := fetchi.dec_btb.you
+  io.back.pred.idx := fetchi.dec_btb.idx
 
-  ras.io <> io.back.rasIO
+  ras.pop := io.back.ras_pop
+  ras.push.valid := io.back.ras_push
+  ras.push.bits  := io.back.ras_tgt
 
-  btb.io.pc       := if_reg_pc
-  btb.io.peekRAS  := ras.io.peek
-  btb.io.feedBack <> io.back.feedBack
+  btb.if_pc := if_reg_pc
+  btb.fb_pc := io.back.fb_pc
+  btb.raspeek  := ras.peek
+  btb.feedBack := io.back.feedBack
+
   if (conf.verbose) {
     when (io.cyc > 16427.U && io.cyc < 16475.U) {
-      printf(p"FrontEnd: if_pc_next: ${Hexadecimal(if_pc_next)}, dec_kill: ${io.back.dec_kill}, if_kill: ${io.back.if_kill}\n")
+      printf(p"FrontEnd: if_pc_next: ${Hexadecimal(if_pc_next)}, dec_kill: ${io.back.kill}, if_kill: $if_kill\n")
     }
   }
 }

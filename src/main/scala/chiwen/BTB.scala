@@ -14,36 +14,31 @@ trait BTBParams {
 }
 
 object CFIType {
-  val NUM = 4
-  val SZ = log2Ceil(NUM)
   val invalid = 0
   val retn    = 1
   val branch  = 2
   val jump    = 3
+  val NUM = jump + 1
+  val SZ = log2Ceil(NUM)
 }
 
-class FeedBack(val addr_width: Int) extends Bundle with BTBParams {
-  val redirect = Bool()             //critical
-  val sel      = new Valid(UInt(log2Ceil(nEntries).W)) //sel.valid critical
-  val pc       = UInt(addr_width.W)
-  val target   = UInt(addr_width.W)
-  val cfiType  = UInt(CFIType.SZ.W)
-}
-
-class Predict(val addr_width: Int) extends Bundle with BTBParams {
-  val Tp  = UInt(CFIType.SZ.W)
-  val Tg  = UInt(addr_width.W)
-  val Sel = UInt(log2Ceil(nEntries).W)
+class Predict(val data_width: Int) extends Bundle with BTBParams {
+  val redirect = Bool() // = 0 cont || = 1 jump
+  val typ = UInt(CFIType.SZ.W)
+  val tgt = UInt(data_width.W)
+  val you = Bool()
+  val idx = UInt(log2Ceil(nEntries).W)
 }
 
 class BTB(implicit conf: CPUConfig) extends Module with BTBParams {
   val io = IO(new Bundle{
     // pc stage inquire
-    val pc       = Input(UInt(conf.xprlen.W))
-    val peekRAS  = Input(UInt(conf.xprlen.W)) // used for return type
+    val if_pc = Input(UInt(conf.xprlen.W))
+    val fb_pc = Input(UInt(conf.xprlen.W))
+    val raspeek  = Input(UInt(conf.xprlen.W)) // used for return type
     val predict  = Output(new Predict(conf.xprlen))
-    // exe stage forward back
-    val feedBack = Input(new FeedBack(conf.xprlen))
+    val feedBack = Input(new Predict(conf.xprlen))
+
     val cyc = Input(UInt(conf.xprlen.W))
   })
 
@@ -70,7 +65,7 @@ class BTB(implicit conf: CPUConfig) extends Module with BTBParams {
   val cfiType         = Wire(UInt(CFIType.SZ.W))
   val hcnt            = Wire(UInt(cntLen.W))
   val brjmp           = Wire(UInt(conf.xprlen.W))
-  val pc_page         = io.pc(conf.xprlen-1, OFF_MSB+1)
+  val pc_page         = io.if_pc(conf.xprlen-1, OFF_MSB+1)
   val page_sel:  UInt = page_matches.asUInt & pg_valids.asUInt
   val tg_page         = Mux1H(page_sel, tg_pages)
   idx_matches        := page_idxs.map(page_sel(_))
@@ -83,8 +78,8 @@ class BTB(implicit conf: CPUConfig) extends Module with BTBParams {
   * 3. if it is jump, then use brjump
   * */
   val pc_cands = Wire(Vec(CFIType.NUM, UInt(conf.xprlen.W)))
-  val pc_plus: UInt = io.pc + 4.U(conf.xprlen.W)
-  pc_offset  := io.pc(OFF_MSB, OFF_LSB)
+  val pc_plus: UInt = io.if_pc + 4.U(conf.xprlen.W)
+  pc_offset  := io.if_pc(OFF_MSB, OFF_LSB)
   off_matches:= pc_offsets.map(_ === pc_offset)
   off_sel    := off_matches.asUInt & idx_matches.asUInt & off_valids.asUInt
   tg_offset  := Mux1H(off_sel, tg_offsets)
@@ -93,23 +88,24 @@ class BTB(implicit conf: CPUConfig) extends Module with BTBParams {
   brjmp      := Cat(tg_page, tg_offset, 0.U(OFF_LSB.W))
 
   pc_cands(CFIType.invalid) := pc_plus
-  pc_cands(CFIType.retn)    := io.peekRAS
+  pc_cands(CFIType.retn)    := io.raspeek
   pc_cands(CFIType.jump)    := brjmp
   pc_cands(CFIType.branch)  := brjmp
-  // pc_cands(i)(CFIType.branch)  := Mux(hcnt(i)(1).toBool, brjmp(i), pc_plus)
+  // pc_cands(i)(CFIType.branch) := Mux(hcnt(i)(1).toBool, brjmp(i), pc_plus)
   // FIXME: can optimized???
-  io.predict.Tg  := pc_cands(Mux(cfiType === CFIType.branch.U && !hcnt(1).toBool, CFIType.invalid.U, cfiType))
-  io.predict.Sel := OHToUInt(off_sel)
-  io.predict.Tp  := cfiType
-  // Feedback ports **exe stage**
+  io.predict.redirect := io.predict.you && (cfiType =/= CFIType.branch.U || hcnt(1).toBool)
+  io.predict.you := off_sel.orR
+  io.predict.tgt := pc_cands(Mux(io.predict.redirect, cfiType, CFIType.invalid.U))
+  io.predict.idx := OHToUInt(off_sel)
+  io.predict.typ := cfiType
   /*
   * 1. page already exists === need pc page equal and target page equal
   * 2. page can be inserted
   * 3. page must replace the least recently used page
   * */
   val pg_matches = Wire(Vec(nPages, Bool()))
-  val pc_pg = io.feedBack.pc(conf.xprlen-1, OFF_MSB+1)
-  val new_tg_pg = io.feedBack.target(conf.xprlen-1, OFF_MSB+1)
+  val pc_pg = io.fb_pc(conf.xprlen-1, OFF_MSB+1)
+  val new_tg_pg = io.feedBack.tgt(conf.xprlen-1, OFF_MSB+1)
   pg_matches := pc_pages.map(_ === pc_pg)
   val pg_sel: UInt = pg_matches.asUInt & pg_valids.asUInt
   val tg_pg = Mux1H(pg_sel, tg_pages)
@@ -155,7 +151,7 @@ class BTB(implicit conf: CPUConfig) extends Module with BTBParams {
   * 3. io.feedBack.sel.valid(false), io.feedBack.valid(true)  --need insert and replace
   * 4. io.feedBack.sel.valid(false), io.feedBack.valid(false) --no side effect
   * */
-  def update_map(idx: UInt) = {
+  def update_map(idx: UInt): Unit = {
     when (page_exist) {
       page_idxs(idx)     := page_idx
       tg_pages(page_idx) := new_tg_pg
@@ -169,27 +165,25 @@ class BTB(implicit conf: CPUConfig) extends Module with BTBParams {
       when (pg_idx_invalid(i)) { off_valids(i)  := false.B }
     }
     off_valids(idx)  := true.B
-    tg_offsets(idx)  := io.feedBack.target(OFF_MSB, OFF_LSB)
-    pc_offsets(idx)  := io.feedBack.pc(OFF_MSB, OFF_LSB)
-    cfiTypes(idx)    := io.feedBack.cfiType
+    tg_offsets(idx)  := io.feedBack.tgt(OFF_MSB, OFF_LSB)
+    pc_offsets(idx)  := io.fb_pc(OFF_MSB, OFF_LSB)
+    cfiTypes(idx)    := io.feedBack.typ
   }
 
-  when (io.feedBack.redirect) {
-    update_map(Mux(io.feedBack.sel.valid, io.feedBack.sel.bits, off_idx))
-  }
+  when (io.feedBack.redirect) { update_map(Mux(io.feedBack.you, io.feedBack.idx, off_idx)) }
 
-  when (io.feedBack.sel.valid) {    // BTB already exist, need update the map
-    when (io.feedBack.cfiType === CFIType.branch.U) {
-      val fb_hcnt = hcnts(io.feedBack.sel.bits)
+  when (io.feedBack.you) {    // BTB already exist, need update the map
+    when (io.feedBack.typ === CFIType.branch.U) {
+      val fb_hcnt = hcnts(io.feedBack.idx)
       when (io.feedBack.redirect) {
         when (fb_hcnt =/= Fill(cntLen, 1.U(1.W))) {
-          hcnts(io.feedBack.sel.bits) := fb_hcnt + 1.U
+          hcnts(io.feedBack.idx) := fb_hcnt + 1.U
         }
       }.elsewhen(fb_hcnt =/= 0.U) {
-        hcnts(io.feedBack.sel.bits) := fb_hcnt - 1.U
+        hcnts(io.feedBack.idx) := fb_hcnt - 1.U
       }
     }.elsewhen(!io.feedBack.redirect) {
-      off_valids(io.feedBack.sel.bits) := false.B
+      off_valids(io.feedBack.idx) := false.B
     }
   }
   .elsewhen(io.feedBack.redirect) { // BTB not exist, need insert or replace

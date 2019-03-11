@@ -5,17 +5,19 @@ import chisel3.util.Valid
 import common.{CPUConfig, MemPortIo}
 
 class InterfaceIO(val data_width: Int) extends Bundle {
-  val xcpt     = Input(new Valid(UInt(data_width.W)))
+  val xcpt = Input(new Valid(UInt(data_width.W)))
+  val kill = Input(Bool())
   val forward  = Input(Bool())
-  val if_kill  = Input(Bool())
-  val dec_kill = Input(Bool())
 
   val inst     = Output(Valid(UInt(data_width.W)))
   val pc       = Output(UInt(data_width.W))
   val pred     = Output(new Predict(data_width))
-
-  val rasIO    = new RasIO(data_width)
-  val feedBack = Input(new FeedBack(data_width))
+  val jump     = Output(UInt(Jump.NUM.W))
+  val ras_pop  = Input(Bool())
+  val ras_push = Input(Bool())
+  val ras_tgt  = Input(UInt(data_width.W))
+  val fb_pc    = Input(UInt(data_width.W))
+  val feedBack = Input(new Predict(data_width))
 }
 
 class Core(implicit conf: CPUConfig) extends Module with BTBParams {
