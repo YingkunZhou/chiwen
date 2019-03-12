@@ -39,7 +39,7 @@ class FrontEnd (implicit conf: CPUConfig) extends Module with BTBParams {
   when (fetchi.pc_forward) { if_reg_pc := if_pc_next }
 
   fetchi.mem      <> io.mem
-  fetchi.pc       := if_reg_pc
+  fetchi.if_pc    := if_reg_pc
   fetchi.if_btb   := btb.predict
   fetchi.if_kill  := io.back.kill || io.back.xcpt.valid || if_kill
   fetchi.dec_kill := io.back.kill || io.back.xcpt.valid
@@ -54,7 +54,7 @@ class FrontEnd (implicit conf: CPUConfig) extends Module with BTBParams {
   io.back.jump := microDec.jump
   io.back.pred.redirect := fetchi.dec_btb.redirect
   io.back.pred.typ := fetchi.dec_btb.typ
-  io.back.pred.tgt := Mux(if_kill, ras.peek, fetchi.dec_btb.tgt)
+  io.back.pred.tgt := Mux(mispredict, ras.peek, fetchi.dec_btb.tgt)
   io.back.pred.you := fetchi.dec_btb.you
   io.back.pred.idx := fetchi.dec_btb.idx
 

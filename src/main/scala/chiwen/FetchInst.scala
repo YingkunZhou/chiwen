@@ -19,13 +19,14 @@ class FetchInst(implicit conf: CPUConfig) extends Module with BTBParams {
 
     val if_btb     = Input(new Predict(conf.xprlen))
     val dec_btb    = Output(new Predict(conf.xprlen))
-    val pc         = Input(UInt(conf.xprlen.W))
-    val pc_forward = Output(Bool())
-    val forward    = Input(Bool())
+    val if_pc      = Input(UInt(conf.xprlen.W))
+    val dec_pc     = Output(UInt(conf.xprlen.W))
     val if_kill    = Input(Bool()) // from dec and downflow
     val dec_kill   = Input(Bool()) // from exe and downflow
+
+    val pc_forward = Output(Bool())
+    val forward    = Input(Bool())
     val inst       = Output(Valid(UInt(conf.xprlen.W)))
-    val dec_pc     = Output(UInt(conf.xprlen.W))
   })
 
   val sWtAddrOK :: sWtInstOK :: sWtForward :: Nil = Enum(3)
@@ -35,11 +36,11 @@ class FetchInst(implicit conf: CPUConfig) extends Module with BTBParams {
   icache.io.cyc := io.cyc
   icache.io.axi.r <> io.mem.r
   icache.io.axi.ar.ready := io.mem.ar.ready
-  icache.io.core.pc.bits := io.pc
+  icache.io.core.pc.bits := io.if_pc
   icache.io.core.pc.valid := conf.use_cc.B & pc_valid
   io.mem.ar.id    := Mux(conf.use_cc.B, icache.io.axi.ar.id, conf.incRd)
   io.mem.ar.valid := Mux(conf.use_cc.B, icache.io.axi.ar.valid, pc_valid)
-  io.mem.ar.addr  := Mux(conf.use_cc.B, icache.io.axi.ar.addr, io.pc)
+  io.mem.ar.addr  := Mux(conf.use_cc.B, icache.io.axi.ar.addr, io.if_pc)
   io.mem.ar.burst := Mux(conf.use_cc.B, icache.io.axi.ar.burst, "b01".U)
   io.mem.ar.len   := Mux(conf.use_cc.B, icache.io.axi.ar.len, 0.U)
   io.mem.ar.size  := Mux(conf.use_cc.B, icache.io.axi.ar.size, "b010".U)
@@ -87,7 +88,7 @@ class FetchInst(implicit conf: CPUConfig) extends Module with BTBParams {
 
   when(pc_valid) { //enter into dec stage wait for inst come back
     reg_pred := io.if_btb
-    reg_pc   := io.pc
+    reg_pc   := io.if_pc
   }
 
   io.inst.bits := LatchData(inst.valid, inst.bits)
@@ -103,9 +104,9 @@ class FetchInst(implicit conf: CPUConfig) extends Module with BTBParams {
         ))
       )
       printf(p"${io.cyc}")
-      printf(p" pc_valid $pc_valid pc ${Hexadecimal(io.pc)} pc_forward ${io.pc_forward}")
+      printf(p" pc_valid $pc_valid pc ${Hexadecimal(io.if_pc)} pc_forward ${io.pc_forward}")
       printf(p" dec_kill ${io.dec_kill} inst_kill $inst_kill inst_valid ${inst.valid} forward ${io.forward}\n")
-      printf(p"pc = ${Hexadecimal(io.pc)} valid = $pc_valid pc_fwd = ${io.pc_forward} if_kill = ${io.if_kill}, fwd = ${io.forward}\n")
+      printf(p"pc = ${Hexadecimal(io.if_pc)} valid = $pc_valid pc_fwd = ${io.pc_forward} if_kill = ${io.if_kill}, fwd = ${io.forward}\n")
     }
   }
 }
