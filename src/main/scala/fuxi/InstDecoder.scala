@@ -5,13 +5,6 @@ import chisel3.util._
 import common.{CPUConfig, CSR}
 import common.Instructions._
 
-object Jump {
-  val none = 0
-  val push = 1
-  val pop  = 2
-  val NUM: Int  = pop + 1
-}
-
 class CtrlInfo extends Bundle {
   val br_type = UInt(BR_N.getWidth.W)
   val op1_sel = UInt(OP1_X.getWidth.W)
@@ -27,8 +20,6 @@ class CtrlInfo extends Bundle {
   val csr_cmd = UInt(CSR.N.getWidth.W)
   val illegal = Bool()
   val fencei  = Bool()
-  val cfi_branch = Bool()
-  val cfi_jump = UInt(Jump.NUM.W)
 }
 
 class DataInfo(val data_width: Int) extends Bundle {
@@ -138,36 +129,6 @@ class InstDecoder(implicit conf: CPUConfig) extends Module {
   io.rs2_addr := io.inst(RS2_MSB, RS2_LSB)
   io.wbaddr   := io.inst(RD_MSB , RD_LSB)
 
-  val func = io.inst(6,0)
-  io.cinfo.cfi_branch := func === "b1100011".U
-  def link(addr: UInt): Bool = addr === 1.U || addr === 5.U
-  /*
-  * A JAL instruction should push the return address onto
-  * a return-address stack (RAS) only when rd=x1/x5
-  * JALR instructions should push/pop a RAS as shown in the Table:
-  *   rd    |   rs1    |    rs1 = rd    |   RAS action
-  * !link   |  !link   |        -       |   none
-  * !link   |   link   |        -       |   pop
-  *  link   |  !link   |        -       |   push
-  *  link   |   link   |        0       |   push and pop
-  *  link   |   link   |        1       |   push
-  */
-  val cfiType_jal: Bool  = func === "b1101111".U
-  val cfiType_jalr: Bool = func === "b1100111".U
-  val cifType_jump       = Wire(Vec(Jump.NUM, Bool()))
-  val pop_push: Bool     =  cfiType_jalr &&  link(io.wbaddr) && link(io.rs1_addr)  && io.wbaddr =/= io.rs1_addr
-  cifType_jump(Jump.none) := (cfiType_jalr && !link(io.wbaddr) && !link(io.rs1_addr))  || //case 1
-    (cfiType_jal  && !link(io.wbaddr))    // case 2
-
-  cifType_jump(Jump.push) := (cfiType_jal  &&  link(io.wbaddr))||  // case 1
-    (cfiType_jalr &&  link(io.wbaddr) && !link(io.rs1_addr)) || // case 2
-    (cfiType_jalr &&  link(io.wbaddr) &&  link(io.rs1_addr)  && io.wbaddr === io.rs1_addr) || //case 3
-    pop_push // case 4
-
-  cifType_jump(Jump.pop)  :=  cfiType_jalr && !link(io.wbaddr) &&  link(io.rs1_addr)  || //case 1
-    pop_push // case 2
-
-  io.cinfo.cfi_jump := cifType_jump.asUInt
   // immediates
   val imm_itype  = io.inst(31,20)
   val imm_stype  = Cat(io.inst(31,25), io.inst(11,7))
