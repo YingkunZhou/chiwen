@@ -45,8 +45,8 @@ class FrontEnd (implicit conf: CPUConfig) extends Module with BTBParams {
   fetchi.dec_kill := io.back.kill || io.back.xcpt.valid
   fetchi.forward  := io.back.forward
   microDec.inst   := fetchi.inst.bits
-  if (conf.hasBTB) mispredict := fetchi.inst.valid && microDec.jump(Jump.pop) &&
-    (ras.peek =/= fetchi.dec_btb.tgt || fetchi.dec_btb.typ =/= CFIType.retn.U || !fetchi.dec_btb.you)
+  val ras_pop = fetchi.inst.valid && microDec.jump(Jump.pop)
+  if (conf.hasBTB) mispredict := ras_pop && ras.peek =/= fetchi.dec_btb.tgt
   else mispredict := false.B
 
   io.back.inst := fetchi.inst
@@ -59,9 +59,7 @@ class FrontEnd (implicit conf: CPUConfig) extends Module with BTBParams {
   io.back.pred.idx := fetchi.dec_btb.idx
 
   ras.pop := io.back.ras_pop
-  ras.push.valid := io.back.ras_push
-  ras.push.bits  := io.back.ras_tgt
-
+  ras.push := io.back.ras_push
   btb.if_pc := if_reg_pc
   btb.fb_pc := io.back.fb_pc
   btb.raspeek  := ras.peek

@@ -190,8 +190,8 @@ class BackEnd(implicit conf: CPUConfig) extends Module with BTBParams {
   exe_wbdata := alu.result
 
   io.front.ras_pop  := Pulse(exe_wire.jump(Jump.pop).toBool,  !stall(Stage.MEM))
-  io.front.ras_push := Pulse(exe_wire.jump(Jump.push).toBool, !stall(Stage.MEM))
-  io.front.ras_tgt  := alu.target.conti
+  io.front.ras_push.valid := Pulse(exe_wire.jump(Jump.push).toBool, !stall(Stage.MEM))
+  io.front.ras_push.bits  := alu.target.conti
 
   io.front.feedBack.you := Pulse(exe_wire.btb_you, !stall(Stage.MEM))
   io.front.feedBack.idx := exe.btb.idx
@@ -216,11 +216,10 @@ class BackEnd(implicit conf: CPUConfig) extends Module with BTBParams {
   else mispredict := alu.ctrl.pc_sel =/= PC_4 && exe_valid
 
   val mem_reg_exe_out = Reg(UInt(conf.xprlen.W))
-  val mem_reg_jpnpc   = RegInit(0.U(conf.xprlen.W))
+  val mem_reg_jpnpc   = Reg(UInt(conf.xprlen.W))
   when (!stall(Stage.EXE) && stall(Stage.MEM) || io.front.xcpt.valid) {
     mem_valid    := false.B
-    mem_reg_jpnpc:= 0.U
-  } .elsewhen (!stall(Stage.MEM)) {
+  }.elsewhen (!stall(Stage.MEM)) {
     mem_valid    := exe_valid
     mem.rf_wen   := exe.rf_wen
     mem.mem_en   := exe.mem_en
@@ -255,7 +254,7 @@ class BackEnd(implicit conf: CPUConfig) extends Module with BTBParams {
     2.U -> mem_reg_exe_out(0),
     3.U -> mem_reg_exe_out(1,0).orR
   ))
-  val ma_jump: Bool    = mem_reg_jpnpc(1,0).orR
+  val ma_jump: Bool    = mem_reg_jpnpc(1,0).orR && mem_valid
   val ma_load: Bool    = mem_wire.mem_en && mem.mem_fcn === M_XRD && ls_addr_ma_valid
   val ma_store: Bool   = mem_wire.mem_en && mem.mem_fcn === M_XWR && ls_addr_ma_valid
   csr.io.xcpt  := ma_load || ma_store || ma_jump || mem_wire.illegal

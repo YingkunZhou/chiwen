@@ -14,8 +14,7 @@ class InterfaceIO(val data_width: Int) extends Bundle {
   val pred     = Output(new Predict(data_width))
   val jump     = Output(UInt(Jump.NUM.W))
   val ras_pop  = Input(Bool())
-  val ras_push = Input(Bool())
-  val ras_tgt  = Input(UInt(data_width.W))
+  val ras_push = Input(Valid(UInt(data_width.W)))
   val fb_pc    = Input(UInt(data_width.W))
   val feedBack = Input(new Predict(data_width))
 }
