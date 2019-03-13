@@ -48,20 +48,20 @@ class FetchInst(implicit conf: CPUConfig) extends Module with BTBParams {
   val inst_odd   = RegInit(false.B)
   val inst_kill  = RegInit(false.B)
   val inst_split = RegInit(false.B)
-  val inst_valids= Wire(Vec(2, Bool()))
-  val inst_valid = Mux(inst_odd, inst_valids(1), inst_valids(0))
-  inst_valids(0) := Mux(io.mem.r.id === conf.incRd, io.mem.r.valid, icache.io.core.inst(0).valid) && !inst_odd
-  inst_valids(1) := Mux(io.mem.r.id === conf.incRd, io.mem.r.valid &&  inst_odd, icache.io.core.inst(1).valid)
-  val if_forward = io.forward(1) || inst_kill || Mux(inst_split, io.pc(conf.pcLSB).toBool, !inst_valids(1))
+  val inst_valid = Wire(Vec(2, Bool()))
+  inst_valid(0) := Mux(io.mem.r.id === conf.incRd, io.mem.r.valid, icache.io.core.inst(0).valid) && !inst_odd
+  inst_valid(1) := Mux(io.mem.r.id === conf.incRd, io.mem.r.valid && inst_odd, icache.io.core.inst(1).valid)
 
   val sWtAddrOK :: sWtInstOK :: sWtForward :: Nil = Enum(3)
   val state = RegInit(sWtAddrOK)
+  val inst_valid_orR: Bool = inst_valid.reduce(_||_)
+  val if_forward: Bool = io.forward(1) || inst_kill || Mux(inst_split, io.pc(conf.pcLSB).toBool, !inst_valid(1))
   switch (state) {
     is (sWtAddrOK) {
       when (addr_ready) { state := sWtInstOK }
     }
     is (sWtInstOK) {
-     when(inst_valid) {
+     when(inst_valid_orR) {
         when(if_forward) {
           state := Mux(addr_ready, sWtInstOK, sWtAddrOK)
         }.elsewhen (io.dec_kill) { state := sWtAddrOK
@@ -77,7 +77,7 @@ class FetchInst(implicit conf: CPUConfig) extends Module with BTBParams {
 
   when (pc_valid) {
     inst_kill := io.if_kill
-  }.elsewhen(inst_valid) {
+  }.elsewhen(inst_valid_orR) {
     inst_kill := false.B
   }.elsewhen(io.dec_kill && state === sWtInstOK) {
     inst_kill := true.B
@@ -87,19 +87,19 @@ class FetchInst(implicit conf: CPUConfig) extends Module with BTBParams {
   val state_WtForward = RegInit(false.B)
 
   pc_valid := state === sWtAddrOK ||
-    (inst_valid && if_forward) ||
+    (inst_valid_orR && if_forward) ||
     (state === sWtForward && io.forward(1))
 
   io.pc_forward := io.if_kill || addr_ready && (
     (state === sWtAddrOK  && !pc_odd_reg)   ||
     (state === sWtForward && io.forward(1)) ||
     ((inst_kill || (inst_split  && io.pc(conf.pcLSB).toBool) ||
-    (io.forward(1) && (inst_valids(1) || inst_split))) && inst_valid))
+    (io.forward(1) && (inst_valid(1) || inst_split))) && inst_valid_orR))
 
-  io.inst(0).valid := ( inst_valids(0) && !inst_kill) || state_WtForward
-  io.inst(1).valid := ((inst_valids(1) && !inst_kill) || state === sWtForward) && !inst_split
+  io.inst(0).valid := ( inst_valid(0) && !inst_kill) || state_WtForward
+  io.inst(1).valid := ((inst_valid(1) && !inst_kill) || state === sWtForward) && !inst_split
 
-  val pc_odd_wire = inst_valids(0) && !inst_valids(1) && !inst_split && !inst_kill
+  val pc_odd_wire = inst_valid(0) && !inst_valid(1) && !inst_split && !inst_kill
   when (addr_ready) { pc_odd_reg := false.B
   }.elsewhen(pc_odd_wire) { pc_odd_reg := true.B }
 
@@ -110,7 +110,7 @@ class FetchInst(implicit conf: CPUConfig) extends Module with BTBParams {
   pc := Mux(pc_odd(1), io.dec_pc(1), io.pc)
 
   when (io.dec_kill || io.forward(0) || inst_kill) { state_WtForward := false.B
-  }.elsewhen(inst_valids(0)) { state_WtForward := true.B  }
+  }.elsewhen(inst_valid(0)) { state_WtForward := true.B  }
 
   /*=======================dec part==============================*/
   val reg_pc   = Reg(Vec(2, UInt(conf.data_width.W)))
@@ -127,7 +127,7 @@ class FetchInst(implicit conf: CPUConfig) extends Module with BTBParams {
     inst(i) := Mux(io.mem.r.id === conf.iccRd, icache.io.core.inst(i).bits, io.mem.r.data)
     io.dec_btb(i)   := reg_pred(i)
     io.dec_pc(i)    := reg_pc(i)
-    io.inst(i).bits := LatchData(inst_valids(i), inst(i), BUBBLE)
+    io.inst(i).bits := LatchData(inst_valid(i), inst(i), BUBBLE)
   }
 
 //  when (io.cyc >= 993.U && io.cyc <= 998.U) {
