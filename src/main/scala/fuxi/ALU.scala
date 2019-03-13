@@ -51,8 +51,8 @@ class ALU(implicit conf: CPUConfig) extends Module {
   // Branch/Jump Target Calculation
   io.target.brjmp    := io.pc + io.op2
   io.target.jpreg    := Cat(add_result(conf.xprlen-1,1), 0.U(1.W))
-  io.target.conti    := io.pc + 4.U  // FIXME: can forward if_pc_plus4 for time saver
-  io.result      := Mux(io.ctrl.wb_sel === WB_PC4, io.target.conti, result)
+  io.target.conti    := io.pc + 4.U
+  io.result := Mux(io.ctrl.wb_sel === WB_PC4, io.target.conti, result)
 
   val br_eq: Bool  = io.op1 === io.rs2_data
   val br_lt: Bool  = io.op1.asSInt < io.rs2_data.asSInt
