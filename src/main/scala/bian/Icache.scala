@@ -138,12 +138,8 @@ class Icache(implicit conf: CPUConfig) extends Module with ICCParams {
   when (rvalid) { wb_buffer(cnt) := io.axi.r.data }
 
   val line_idx       = Wire(Vec(2, UInt(wLine.W)))
-  val icache_inst    = Wire(Vec(2, UInt(conf.xprlen.W)))
   val buffer_inst    = Wire(Vec(2, UInt(conf.xprlen.W)))
   val buf_inst_valid = Wire(Vec(2, Bool()))
-
-  icache_inst(0) := icache.io.rdata(conf.xprlen-1, 0)
-  icache_inst(1) := icache.io.rdata(2*conf.xprlen-1, conf.xprlen)
 
   val wait_inst_back: Bool =
     (state =/= sLookUp    && pc_valid && line_hit) ||
@@ -151,14 +147,12 @@ class Icache(implicit conf: CPUConfig) extends Module with ICCParams {
     (state === sWriteBack && pc_double_miss)
 
   for (i <- 0 until 2) {
-    line_idx(i)           := Cat(pc(conf.pcLSB+wLine-1, conf.pcLSB+1), i.U(1.W))
-    buffer_inst(i)        := Mux(line_hit, wb_buffer(line_idx(i)), icache_inst(i))
-    buf_inst_valid(i)     := ShakeHand(wait_inst_back, wb_buf_valid(line_idx(i)) && line_hit) || cache_hit
-    io.core.inst(i).bits  := Mux(state === sLookUp, icache_inst(i), buffer_inst(i))
+    line_idx(i) := Cat(pc(conf.pcLSB+wLine-1, conf.pcLSB+1), i.U(1.W))
+    buffer_inst(i) := Mux(line_hit, wb_buffer(line_idx(i)), icache.io.rdata((i+1)*conf.xprlen-1, i*conf.xprlen))
+    buf_inst_valid(i) := ShakeHand(wait_inst_back, wb_buf_valid(line_idx(i)) && line_hit) || cache_hit
+    io.core.inst(i).bits := Mux(state === sLookUp, icache.io.rdata((i+1)*conf.xprlen-1, i*conf.xprlen), buffer_inst(i))
+    io.core.inst(i).valid := Mux(state === sLookUp, cache_hit, buf_inst_valid(i))
   }
-
-  io.core.inst(0).valid := Mux(state === sLookUp, cache_hit, buf_inst_valid(0)) && !pc(conf.pcLSB).toBool
-  io.core.inst(1).valid := Mux(state === sLookUp, cache_hit, buf_inst_valid(1))
 
 //  when (io.cyc === 14227.U) {
 //    printf("Icache: state = %c %x pc = %x [inst %x %x] [valid %x %x]\n"
