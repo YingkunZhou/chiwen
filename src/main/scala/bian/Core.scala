@@ -3,7 +3,6 @@ package bian
 import chisel3._
 import chisel3.util.Valid
 import common.{CPUConfig, MemPortIo}
-import myCore.PredictInfo
 
 class InterfaceIO(val data_width: Int) extends Bundle {
   val xcpt = Input(new Valid(UInt(data_width.W)))

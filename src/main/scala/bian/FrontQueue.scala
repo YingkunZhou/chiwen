@@ -18,7 +18,7 @@ trait Pram {
 }
 
 trait FrontParam {
-  val nEntry  = 8
+  val nEntry  = 16
   val wEntry = log2Ceil(nEntry)
   val head = 0
   val tail = 1
@@ -26,7 +26,8 @@ trait FrontParam {
 
 class PredictInfo(val data_width: Int) extends Bundle {
   val bj_sel = Vec(2, Bool()) //determine pick which btb
-  val split  = Bool()
+  val cancel = Bool()
+  val is_jal = Bool()
   val pred   = new Predict(data_width)
   val branch = Bool()
   val jump   = UInt(Jump.NUM.W)
@@ -36,13 +37,14 @@ class FrontQueue(implicit val conf: CPUConfig) extends Module with FrontParam {
   val io = IO(new Bundle {
     val xcpt = Input(Valid(UInt(conf.data_width.W)))
     val kill = Input(Valid(UInt(conf.data_width.W)))
-    val inst_i  = Input(Vec(2, Valid(UInt(conf.inst_width.W)))) //valid & !split
+    val inst_i  = Input(Vec(conf.nInst, Valid(UInt(conf.inst_width.W))))
     val info_i  = Input(new PredictInfo(conf.data_width))
-    val inst_o  = Output(Vec(2, Valid(UInt(conf.inst_width.W))))
+    val inst_o  = Output(Vec(conf.nInst, Valid(UInt(conf.inst_width.W))))
     val info_o  = Output(new PredictInfo(conf.data_width))
+    val split   = Output(Bool())
     val forward = Output(Bool())
     val ready = Input(Vec(conf.nInst, Bool()))
-    val pc = Output(Vec(2, UInt(conf.data_width.W)))
+    val pc = Output(Vec(conf.nInst, UInt(conf.data_width.W)))
   })
 
   def next(ptr: UInt, nEntry: Int): UInt = {
@@ -50,21 +52,21 @@ class FrontQueue(implicit val conf: CPUConfig) extends Module with FrontParam {
     else Mux(ptr === (nEntry-1).U, 0.U, ptr + 1.U)
   }
 
-  val ptr  = RegInit(VecInit(Seq.fill(2)(0.U(wEntry.W))))
-  val full = RegInit(false.B)
-  val flush = io.xcpt.valid || io.kill.valid
-  val ptr_inc  = Wire(Vec(2, Bool()))
-  val ptr_next = ptr.map(i => next(i, nEntry))
   val inst = RegInit(VecInit(Seq.fill(conf.nInst) {
     val w = Wire(Valid(UInt(conf.inst_width.W)))
     w.valid := false.B
     w.bits := DontCare
     w
   }))
+  io.inst_o := inst
+  io.split  := io.info_o.cancel && io.info_o.bj_sel(0) //around 28 gates
 
-  io.inst_o(0).valid := inst(0).valid
-  io.inst_o(1).valid := inst(1).valid && !(io.info_o.split && io.info_o.bj_sel(0) && inst(0).valid)
-  for (i <- 0 until conf.nInst) io.inst_o(i).bits  := inst(i).bits
+  val flush = io.xcpt.valid || io.kill.valid
+
+  val ptr  = RegInit(VecInit(Seq.fill(2)(0.U(wEntry.W))))
+  val full = RegInit(false.B)
+  val ptr_inc  = Wire(Vec(2, Bool()))
+  val ptr_next = ptr.map(i => next(i, nEntry))
 
   val instQueue = Mem(nEntry, Vec(conf.nInst, Valid(UInt(conf.inst_width.W))))
   val infoQueue = Mem(nEntry, new PredictInfo(conf.data_width))
@@ -72,11 +74,10 @@ class FrontQueue(implicit val conf: CPUConfig) extends Module with FrontParam {
   val headNtail = ptr(head) =/= ptr(tail)
   val out_valid = io.inst_o.map(_.valid).reduce(_||_)
   val in_valid = io.inst_i.map(_.valid).reduce(_||_)
-  val out_fire = (0 until conf.nInst).map(i => !io.inst_o(i).valid || io.ready(i)).reduce(_||_)
+  val out_fire = (0 until conf.nInst).map(i => !io.inst_o(i).valid || io.ready(i)).reduce(_&&_) // both fire
   io.forward := !full || out_fire
-
-  ptr_inc(head) := out_fire  && (full || headNtail)
-  ptr_inc(tail) := out_valid && (Mux(full, out_fire, !out_fire) || headNtail)
+  ptr_inc(head) := out_fire && (full || headNtail)
+  ptr_inc(tail) := in_valid && (Mux(full, out_fire, !out_fire) || headNtail)
 
   when(flush) {ptr(tail) := 0.U
   }.elsewhen (ptr_inc(tail)) {ptr(tail) := ptr_next(tail)}
@@ -89,7 +90,7 @@ class FrontQueue(implicit val conf: CPUConfig) extends Module with FrontParam {
     inst(0).valid := false.B
   }.elsewhen(ptr_inc(head)) {
     inst := instQueue(ptr(head))
-  }.elsewhen(out_fire && out_valid) {
+  }.elsewhen(out_fire && in_valid) {
     inst := io.inst_i
   }
 
@@ -115,8 +116,7 @@ class FrontQueue(implicit val conf: CPUConfig) extends Module with FrontParam {
     w.ptr(tail) := 0.U
     w
   })
-  val pred_ptr_inc  = Wire(Vec(2, Bool()))
-  val pred_ptr_next = pred_ctrl.ptr.map(i => next(i, nEntry))
+
   when(flush) {
     pred_ctrl.valid := false.B
   }.elsewhen(!full) {
@@ -128,8 +128,10 @@ class FrontQueue(implicit val conf: CPUConfig) extends Module with FrontParam {
   val info = infoQueue(pred_ctrl.ptr(head))
   io.info_o := Mux(pred_ctrl.empty, io.info_i, info)
 
-  pred_ptr_inc(tail) :=  pred_ctrl.valid && (headNtail ||
-    Mux(pred_ctrl.empty, !out_fire, out_fire && pred_ctrl.ptr(head) === pred_ctrl.ptr(tail)))
+  val pred_headNtail = pred_ctrl.ptr(head) =/= pred_ctrl.ptr(tail)
+  val pred_ptr_inc  = Wire(Vec(2, Bool()))
+  val pred_ptr_next = pred_ctrl.ptr.map(i => next(i, nEntry))
+  pred_ptr_inc(tail) :=  pred_ctrl.valid && (pred_headNtail || Mux(pred_ctrl.empty, !out_fire, out_fire))
   pred_ptr_inc(head) := !pred_ctrl.empty && out_fire
 
   when(flush) {
@@ -176,4 +178,11 @@ class FrontQueue(implicit val conf: CPUConfig) extends Module with FrontParam {
   //cached
   when(ptr_inc(tail)) {instQueue(ptr(tail)) := io.inst_i}
   when(pred_ptr_inc(tail)) {infoQueue(pred_ctrl.ptr(tail)) := io.info_i}
+
+  printf(p"ptr $ptr full $full flush $flush ptr_inc $ptr_inc [ptr_next ${ptr_next(0)} ${ptr_next(1)}] " +
+    p"[inst ${inst(0).valid}: ${inst(0).bits} ${inst(1).valid}: ${inst(1).bits}] ready ${io.ready}\n" +
+    p"[inst ${io.inst_i(0).valid}: ${io.inst_i(0).bits} ${io.inst_i(1).valid}: ${io.inst_i(1).bits}] " +
+    p"out_valid $out_valid out_fire $out_fire in_valid $in_valid forward ${io.forward} pc ${Hexadecimal(pc)}\n" +
+    p"ptr ${pred_ctrl.ptr} empty ${pred_ctrl.empty} valid ${pred_ctrl.valid} " +
+    p"ptr_inc $pred_ptr_inc ptr_next ${pred_ptr_next(0)} ${pred_ptr_next(1)} pred_id ${io.info_o.pred.idx}\n\n")
 }
