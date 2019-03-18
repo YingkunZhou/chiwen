@@ -20,10 +20,10 @@ class InstDecoder(implicit conf: CPUConfig) extends Module {
     val order   = Output(Bool())
     val fencei  = Output(Bool())
     val br_type = Output(UInt(BR_N.getWidth.W))
-    val mem_en  = Bool()
-    val mem_fcn = UInt(M_X.getWidth.W)
-    val mem_typ = UInt(MT_X.getWidth.W)
-    val csr_cmd = UInt(CSR.SZ)
+    val mem_en  = Output(Bool())
+    val mem_fcn = Output(UInt(M_X.getWidth.W))
+    val mem_typ = Output(UInt(MT_X.getWidth.W))
+    val csr_cmd = Output(UInt(CSR.SZ))
     val imm     = Output(UInt(12.W))
     val imm7_0  = Output(UInt(8.W))
     val imm_z   = Output(UInt(5.W))
@@ -103,8 +103,8 @@ class InstDecoder(implicit conf: CPUConfig) extends Module {
   val (val_inst: Bool) :: br_type :: op1_sel :: op2_sel :: (rs1_oen: Bool) :: (rs2_oen: Bool) :: sig1 = signals
   val alu_fun :: wb_sel :: (rd_wen: Bool) :: (mem_en: Bool) :: mem_fcn :: mem_typ :: sig2 = sig1
   val csr_cmd :: (fencei: Bool) :: (order: Bool) :: cycle :: Nil = sig2
-  io.op.op1_sel := op1_sel
-  io.op.op2_sel := op2_sel
+  io.op.op1_sel := Mux(io.rs(0).addr === 0.U, OP1_X, op1_sel)
+  io.op.op2_sel := Mux(io.rs(1).addr === 0.U, OP2_X, op2_sel(1,0)) // for space saving
   io.op.alu_fun := alu_fun
   io.op.wb_sel  := wb_sel
   io.op.cycle   := cycle
@@ -119,9 +119,9 @@ class InstDecoder(implicit conf: CPUConfig) extends Module {
   io.rs(0).addr  := io.inst(RS1_MSB, RS1_LSB)
   io.rs(1).addr  := io.inst(RS2_MSB, RS2_LSB)
   io.rd.addr     := io.inst(RD_MSB , RD_LSB)
-  io.rs(0).valid := !rs1_oen
-  io.rs(1).valid := !rs2_oen
-  io.rd.valid    := rd_wen
+  io.rs(0).valid := !rs1_oen || io.rs(0).addr === 0.U
+  io.rs(1).valid := !rs2_oen || io.rs(1).addr === 0.U
+  io.rd.valid    := rd_wen   && io.rd.addr =/= 0.U
   io.f1 := cycle === CYC_1
 
   // immediates

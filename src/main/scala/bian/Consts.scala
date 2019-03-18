@@ -34,24 +34,23 @@ trait ScalarOpConstants {
   val BR_JR    = 8.U(4.W)  // Jump Register
 
   // RS1 Operand Select Signal
-  val OP1_RS1   = 0.U(2.W) // Register Source #1
-  val OP1_PC    = 1.U(2.W) // PC
-  val OP1_IMZ   = 2.U(2.W) // Zero-extended Immediate from RS1 field, for use by CSRI instructions
   val OP1_X     = 0.U(2.W)
-
-  // RS2 Operand Select Signal
-  val OP2_RS2    = 0.U(3.W) // Register Source #2
-  val OP2_ITYPE  = 1.U(3.W) // immediate, I-type
-  val OP2_STYPE  = 2.U(3.W) // immediate, S-type
-  val OP2_SBTYPE = 3.U(3.W) // immediate, B
-  val OP2_UTYPE  = 4.U(3.W) // immediate, U-type
-  val OP2_UJTYPE = 5.U(3.W) // immediate, J-type
-  val OP2_X      = 0.U(3.W)
+  val OP1_RS1   = 1.U(2.W) // Register Source #1
+  val OP1_PC    = 2.U(2.W) // PC
+  val OP1_IMZ   = 3.U(2.W) // Zero-extended Immediate from RS1 field, for use by CSRI instructions
 
   val OP22_X      = 0.U(2.W)
-  val OP22_RS2    = 0.U(2.W) // Register Source #2
-  val OP22_ITYPE  = 1.U(2.W) // immediate, I-type
-  val OP22_UTYPE  = 2.U(2.W) // immediate, U-type
+  val OP22_RS2    = 1.U(2.W) // Register Source #2
+  val OP22_ITYPE  = 2.U(2.W) // immediate, I-type
+  val OP22_UTYPE  = 3.U(2.W) // immediate, U-type
+  // RS2 Operand Select Signal
+  val OP2_X      = 0.U(3.W)
+  val OP2_RS2    = 1.U(3.W) // Register Source #2
+  val OP2_ITYPE  = 2.U(3.W) // immediate, I-type
+  val OP2_UTYPE  = 3.U(3.W) // immediate, U-type
+  val OP2_SBTYPE = 4.U(3.W) // immediate, B
+  val OP2_UJTYPE = 5.U(3.W) // immediate, J-type
+  val OP2_STYPE  = 6.U(3.W) // immediate, S-type
 
   // Register Operand Output Enable Signal
   val OEN_0   = false.B
