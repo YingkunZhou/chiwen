@@ -29,12 +29,12 @@ class BrjrIssue(id_width: Int, val wEntry: Int) extends BrjrIssueIO(id_width) {
   val bidx = UInt(wEntry.W)
 }
 
-class BranchJump(val data_width: Int) extends Module with BjParam {
+class BranchJump extends Module with BjParam {
   val io = IO(new Bundle {
-    val pred_i = Input(Valid(new BrchjrPred(wOrder, data_width)))
+    val pred_i = Input(new BrchjrPred(wOrder, data_width))
     val bidx1H = Output(UInt(nEntry.W)) //alloc
     val bReady = Output(Bool())
-    val ready  = Input(Bool())
+    val inc_tail = Input(Bool())
 
     val issue   = Input(Vec(3, new BrjrIssueIO(wOrder)))
     val br_type = Output(Vec(3, UInt(BR_N.getWidth.W)))
@@ -72,7 +72,6 @@ class BranchJump(val data_width: Int) extends Module with BjParam {
   }))
   val predCount = RegInit(0.U(wCount.W))
   val pred_ctrl = Wire(new Bundle {
-    val inc_tail = Bool()
     val inc_head = Bool()
 
     val table_empty = UInt(nEntry.W)
@@ -105,7 +104,6 @@ class BranchJump(val data_width: Int) extends Module with BjParam {
   })
   io.bReady := pred_ctrl.table_empty.orR || pred_ctrl.inc_head
 
-  pred_ctrl.inc_tail    := io.pred_i.valid && io.ready
   pred_ctrl.inc_head    := !pred_ctrl.queue_empty || pred_ctrl.branch.reduce(_||_)
   pred_ctrl.queue_empty := predQueue.map(!_.valid).reduce(_&&_)
   pred_ctrl.table_empty := VecInit(predTable.map(!_.valid)).asUInt
@@ -114,15 +112,15 @@ class BranchJump(val data_width: Int) extends Module with BjParam {
     UIntToOH(pred_ctrl.fwd_issue.bidx)), PriorityEncoderOH(pred_ctrl.table_empty))
 
   for (i <- 0 until nEntry) when (io.bidx1H(i)) {
-    when (pred_ctrl.inc_tail) {
-      predTable(i).bits  := io.pred_i.bits
+    when (io.inc_tail) {
+      predTable(i).bits  := io.pred_i
     }
   }
   for (i <- 0 until nEntry) when (io.xcpt ||
-    (CmpId(predTable(i).bits.id, io.kill.id, io.id_head) && io.kill.valid)) {
+    (CmpId(io.kill.id, predTable(i).bits.id, io.id_head) && io.kill.valid)) {
       predTable(i).valid := false.B
   }.elsewhen (io.bidx1H(i)) {
-    when (pred_ctrl.inc_tail) {
+    when (io.inc_tail) {
       predTable(i).valid := true.B
     }.elsewhen(pred_ctrl.inc_head) {
       predTable(i).valid := false.B
@@ -131,19 +129,19 @@ class BranchJump(val data_width: Int) extends Module with BjParam {
 
   pred_ctrl.next_count := Mux(pred_ctrl.inc_head, predCount - 1.U, predCount)
   when (io.xcpt) {predCount := 0.U
-  }.elsewhen (pred_ctrl.inc_tail) { when (!pred_ctrl.inc_head) {predCount := predCount + 1.U}
+  }.elsewhen(io.kill.valid) { predCount := pred_ctrl.fwd_ptr
+  }.elsewhen (io.inc_tail) { when (!pred_ctrl.inc_head) {predCount := predCount + 1.U}
   }.otherwise {predCount := pred_ctrl.next_count}
 
-  when (pred_ctrl.inc_tail) {
+  when (io.inc_tail) {
     predQueue(pred_ctrl.next_count).valid := false.B
-    predQueue(pred_ctrl.next_count).id := io.pred_i.bits.id
-    predQueue(pred_ctrl.next_count).branch := io.pred_i.bits.branch
+    predQueue(pred_ctrl.next_count).id := io.pred_i.id
+    predQueue(pred_ctrl.next_count).branch := io.pred_i.branch
   }
 
   pred_ctrl.table_idcam := io.issue.map(i => VecInit(predTable.map(t => t.bits.id === i.id && t.valid)).asUInt)
   pred_ctrl.queue_idcam := io.issue.map(i => PriorityEncoder(VecInit(predQueue.map(q => q.id === i.id)).asUInt)) //FIXME
   pred_ctrl.table_bid1H := Mux1H(pred_ctrl.br_oldest, pred_ctrl.table_idcam)
-
 
   io.br_type := pred_ctrl.table_idcam.map(i => Mux1H(i, predTable.map(_.bits.br_type)))
   pred_ctrl.expect := pred_ctrl.table_idcam.map(i => Mux1H(i, predTable.map(_.bits.redirect)))
@@ -223,7 +221,8 @@ class BranchJump(val data_width: Int) extends Module with BjParam {
   io.kill.bidx := Mux(pred_ctrl.queue_empty, OHToUInt(pred_ctrl.table_bid1H), pred_ctrl.fwd_issue.bidx)
 
   io.feedback.valid := pred_ctrl.inc_head
-  io.feedback.bits.redirect := Mux(pred_ctrl.queue_empty, pred_ctrl.issue_actual, pred_ctrl.fwd_issue.actual || !pred_ctrl.fwd_issue.branch)
+  io.feedback.bits.redirect := Mux(pred_ctrl.queue_empty, pred_ctrl.issue_actual,
+    pred_ctrl.fwd_issue.actual || !pred_ctrl.fwd_issue.branch)
   io.feedback.bits.tgt := Mux(pred_ctrl.queue_empty,
     Mux(pred_ctrl.issue_actual, pred_ctrl.predict(0).tgt, pred_ctrl.predict(0).cont),
     Mux(pred_ctrl.fwd_issue.actual, pred_ctrl.predict(1).tgt, pred_ctrl.predict(1).cont)) //TODO: jalr need not actual to be true

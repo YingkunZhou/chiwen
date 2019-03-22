@@ -35,7 +35,7 @@ class StateTest(c: StateCtrl) extends PeekPokeTester(c){
     poke(c.io.xcpt.valid, in.xcpt_val)
     poke(c.io.xcpt.id, in.xcpt_id)
     for (i <- 0 until 2) {
-      poke(c.io.ready(i), in.ready(i))
+      //TODO: add order_inc & physic_inc
       poke(c.io.logic(i).valid, in.logic_valid(i))
       for (j <- 0 until 2) {
         poke(c.io.logic(i).rs(j).valid, in.logic_rs_val(i)(j))
@@ -44,7 +44,7 @@ class StateTest(c: StateCtrl) extends PeekPokeTester(c){
       //info don't care
       poke(c.io.logic(i).rd.valid, in.logic_rd_val(i))
       poke(c.io.logic(i).rd.addr, in.logic_rd_addr(i))
-      poke(c.io.logic(i).brchjr, in.logic_brchjr(i))
+      poke(c.io.brchjr(i), in.logic_brchjr(i))
     }
     for (i <- 0 until 4) {
       poke(c.io.commit(i).valid, in.commit_valid(i))
@@ -54,20 +54,20 @@ class StateTest(c: StateCtrl) extends PeekPokeTester(c){
     }
     step(1)
   }
-  val in = new StateInput
-  in.logic_valid  = Seq(true, true)
-  in.logic_rs_val = Seq(Seq(false, false), Seq(false, false))
-  in.logic_rs_addr= Seq(Seq(1.U, 2.U), Seq(3.U, 4.U))
-  in.logic_rd_val = Seq(true, true)
-  in.logic_rd_addr= Seq(1.U, 2.U)
-  input(in)
-  in.logic_valid  = Seq(true, true)
-  in.logic_rs_val = Seq(Seq(false, false), Seq(false, false))
-  in.logic_rs_addr= Seq(Seq(1.U, 2.U), Seq(3.U, 4.U))
-  in.logic_rd_val = Seq(true, true)
-  in.logic_rd_addr= Seq(3.U, 4.U)
-  input(in)
-
+//  val in = new StateInput
+//  in.logic_valid  = Seq(true, true)
+//  in.logic_rs_val = Seq(Seq(false, false), Seq(false, false))
+//  in.logic_rs_addr= Seq(Seq(1.U, 2.U), Seq(3.U, 4.U))
+//  in.logic_rd_val = Seq(true, true)
+//  in.logic_rd_addr= Seq(1.U, 2.U)
+//  input(in)
+//  in.logic_valid  = Seq(true, true)
+//  in.logic_rs_val = Seq(Seq(false, false), Seq(false, false))
+//  in.logic_rs_addr= Seq(Seq(1.U, 2.U), Seq(3.U, 4.U))
+//  in.logic_rd_val = Seq(true, true)
+//  in.logic_rd_addr= Seq(3.U, 4.U)
+//  input(in)
+  step(1)
 //  def commit(valid: Seq[Boolean], id: Seq[Int]): Unit = {
 //    for (i <- 0 until 4) {
 //      poke(c.io.commit(i).valid, valid(i))

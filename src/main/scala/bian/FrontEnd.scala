@@ -20,14 +20,13 @@ class FrontEnd(implicit conf: CPUConfig) extends Module with BTBParams {
   fetchi.cyc := io.cyc
 
   val dec_mispredict = Wire(Vec(conf.nInst, Bool()))
-  val error_pred = Wire(Vec(conf.nInst, Bool()))
-  io.back.split := dec_mispredict(0) || error_pred(0)
-
-  val if_kill = Pulse(Mux(dec_isbj(0) , dec_mispredict(0), dec_mispredict(1)),
-                      Mux(dec_isbj(0) , io.back.forward(0), io.back.forward(1)))
-  val dec_kill = Pulse(io.back.pred.cancel, io.back.forward(1)) //FIXME ??? is it right???
+  val dec_pred_error = Wire(Vec(conf.nInst, Bool()))
+  val exe_mispredict = Wire(Bool())
+  val if_kill   = Pulse(Mux(dec_isbj(0) , dec_mispredict(0), dec_mispredict(1)),
+                        Mux(dec_isbj(0) , io.back.forward(0), io.back.forward(1)))
+  val btb_error = (0 until conf.nInst).map(i => Pulse(dec_pred_error(i), io.back.forward(i))) //FIXME!! how to deal with btb error elegent???
+  val dec_kill  = Pulse(exe_mispredict, io.back.forward(1)) //FIXME ??? is it right???
   val rectify_tgt = Wire(UInt(conf.data_width.W))
-  val btb_error  = (0 until conf.nInst).map(i => Pulse(error_pred(i), io.back.forward(i))) //FIXME!! how to deal with btb error elegent???
   val if_reg_pc  = RegInit(START_ADDR)
   val if_next_pc =
         Mux(io.back.xcpt.valid, io.back.xcpt.bits,
@@ -51,13 +50,17 @@ class FrontEnd(implicit conf: CPUConfig) extends Module with BTBParams {
   fetchi.forward(1) := io.back.forward(1) && !dec_isbj.reduce(_&&_)
 
   io.back.pc   := fetchi.dec_pc
-  io.back.inst := fetchi.inst
+  io.back.inst(0).valid := fetchi.inst(0).valid
+  io.back.inst(1).valid := fetchi.inst(1).valid && !dec_mispredict(0) && !dec_pred_error(0)
+  for (i <- 0 until conf.nInst) {
+    io.back.inst(i).bits := fetchi.inst(i).bits
+  }
   val dec_btb_tgt = Wire(Vec(conf.nInst, UInt(conf.data_width.W)))
   for (i <- 0 until conf.nInst) {
     microDec(i).inst  := fetchi.inst(i).bits
     dec_btb_tgt(i) := Mux(dec_mispredict(i), ras.peek, fetchi.dec_btb(i).tgt)
     dec_mispredict(i) := fetchi.inst(i).valid && microDec(i).jump(Jump.pop) && ras.peek =/= fetchi.dec_btb(i).tgt
-    error_pred(i) := fetchi.inst(i).valid && !microDec(i).is_bj && fetchi.dec_btb(i).redirect
+    dec_pred_error(i)  := fetchi.inst(i).valid && !microDec(i).is_bj && fetchi.dec_btb(i).redirect
   }
 
   val bj_reg = Reg(new Bundle {
@@ -85,13 +88,13 @@ class FrontEnd(implicit conf: CPUConfig) extends Module with BTBParams {
     Cat(Fill(20, bj_reg.inst(31)), bj_reg.inst(7), bj_reg.inst(30, 25), bj_reg.inst(11,8), 0.U(1.W)),
     Cat(Fill(12, bj_reg.inst(31)), bj_reg.inst(19,12), bj_reg.inst(20), bj_reg.inst(30,21), 0.U(1.W)))
   rectify_tgt := bj_reg.pc + sext_imm
-  io.back.pred.cancel := (bj_reg.redirect || bj_reg.is_jal) && rectify_tgt =/= bj_reg.tgt //around 24 gates
-  io.back.pred.redirect := Mux(io.back.pred.cancel, true.B, bj_reg.redirect)
-  io.back.pred.tgt := Mux(bj_reg.branch || bj_reg.is_jal, rectify_tgt, bj_reg.tgt)
+  exe_mispredict := (bj_reg.redirect || bj_reg.is_jal) && rectify_tgt =/= bj_reg.tgt //around 24 gates
+  io.back.split := exe_mispredict && bj_reg.bj_sel(0)
+  io.back.pred.redirect := Mux(exe_mispredict, true.B, bj_reg.redirect) // TODO: add more complex predict strategy
+  io.back.pred.tgt    := Mux(bj_reg.branch || bj_reg.is_jal, rectify_tgt, bj_reg.tgt)
   io.back.pred.jump   := bj_reg.jump
   io.back.pred.branch := bj_reg.branch
-  io.back.pred.bj_sel := bj_reg.bj_sel
-  io.back.pred.is_jal := bj_reg.is_jal
+  io.back.pred.brchjr := bj_reg.bj_sel.map(_ && !bj_reg.is_jal)
 
   ras.pop  := io.back.ras_pop
   ras.push := io.back.ras_push

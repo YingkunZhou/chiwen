@@ -5,13 +5,17 @@ import chisel3.util.Valid
 import common.{CPUConfig, MemPortIo}
 
 class InterfaceIO(val data_width: Int) extends Bundle {
-  val xcpt = Input(new Valid(UInt(data_width.W)))
-  val kill = Input(Bool())
+  val xcpt     = Input(new Valid(UInt(data_width.W)))
+  val kill     = Input(Bool())
+
   val forward  = Input(Vec(2, Bool()))
+
   val inst     = Output(Vec(2, Valid(UInt(data_width.W))))
   val pc       = Output(Vec(2, UInt(data_width.W)))
+
   val split    = Output(Bool())
   val pred     = Output(new PredictInfo(data_width))
+
   val ras_pop  = Input(Bool())
   val ras_push = Input(Valid(UInt(data_width.W)))
   val fb_pc    = Input(UInt(data_width.W))

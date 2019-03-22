@@ -45,7 +45,7 @@ trait IssueParam extends Pram {
   val wCount = log2Ceil(nEntry+1)
 }
 
-class InstQueue(val data_width: Int) extends Module with IssueParam {
+class InstQueue extends Module with IssueParam {
   val io = IO(new Bundle{
     val in  = Flipped(Decoupled(new F1Issue(wPhyAddr, wOrder)))
     val issue = Decoupled(new InfoIssue(wPhyAddr, wOrder, data_width))
