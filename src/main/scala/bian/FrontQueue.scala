@@ -60,8 +60,8 @@ class FrontQueue(implicit val conf: CPUConfig) extends Module with FrontParam {
   val in_valid:  Bool = io.inst_i.map(_.valid).reduce(_||_)
 
   val instQueue = Mem(nEntry, Vec(conf.nInst, Valid(UInt(conf.inst_width.W))))
-  val instQ_ptr = RegInit(VecInit(Seq.fill(2)(0.U((wEntry+1).W))))
   val predQueue = Mem(nEntry, new PredictInfo(conf.data_width))
+  val instQ_ptr = RegInit(VecInit(Seq.fill(2)(0.U((wEntry+1).W))))
   val predQ_ptr = RegInit(VecInit(Seq.fill(2)(0.U((wEntry+1).W))))
   val inst = RegInit(VecInit(Seq.fill(conf.nInst) {
     val w = Wire(Valid(UInt(conf.inst_width.W)))

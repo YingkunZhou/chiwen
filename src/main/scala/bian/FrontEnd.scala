@@ -51,7 +51,8 @@ class FrontEnd(implicit conf: CPUConfig) extends Module with BTBParams {
 
   io.back.pc   := fetchi.dec_pc
   io.back.inst(0).valid := fetchi.inst(0).valid
-  io.back.inst(1).valid := fetchi.inst(1).valid && !dec_mispredict(0) && !dec_pred_error(0)
+  io.back.inst(1).valid := fetchi.inst(1).valid && !dec_mispredict(0) &&
+    !dec_pred_error(0) && (!dec_isbj(0) || !microDec(1).is_bj)
   for (i <- 0 until conf.nInst) {
     io.back.inst(i).bits := fetchi.inst(i).bits
   }

@@ -50,13 +50,13 @@ class BackEnd(implicit conf: CPUConfig) extends Module with BTBParams {
   val ready_1 = Wire(Bool())
   val nls_ready_0 = Wire(Vec(conf.nInst, Bool()))
   val nls_ready_1 = Wire(Bool())
-  nls_ready_0(0) := stateCtrl.order_ready(0) && instQueue(0).in.ready &&
+  nls_ready_0(0) := stateCtrl.order_ready(0) && instQueue(0).ready &&
       (!instDecoder(0).rd.valid || stateCtrl.physic_ready(0)) &&
       (!frontQueue.pred_o.brchjr(0) || branchJump.bReady)
-  nls_ready_0(1) := stateCtrl.order_ready(0) && instQueue(1).in.ready &&
+  nls_ready_0(1) := stateCtrl.order_ready(0) && instQueue(1).ready &&
       (!instDecoder(1).rd.valid || stateCtrl.physic_ready(1)) &&
       (!frontQueue.pred_o.brchjr(1) || branchJump.bReady)
-  nls_ready_1 := stateCtrl.order_ready(1) && instQueue(1).in.ready &&
+  nls_ready_1 := stateCtrl.order_ready(1) && instQueue(1).ready &&
       (!instDecoder(1).rd.valid || stateCtrl.physic_ready(1)) &&
       (!frontQueue.pred_o.brchjr(1) || branchJump.bReady)
 

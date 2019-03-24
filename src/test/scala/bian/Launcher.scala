@@ -20,12 +20,22 @@ object Launcher {
     },
     "Frontqueue" -> {manager: TesterOptionsManager =>
       Driver.execute(() => new FrontQueue, manager) {
-        c => new FrontqueueTest(c)
+        c => new FrontQTest(c)
       }
     },
     "BranchJump" -> {manager: TesterOptionsManager =>
       Driver.execute(() => new BranchJump, manager) {
         c => new BJTest(c)
+      }
+    },
+    "InstQueue" -> {manager: TesterOptionsManager =>
+      Driver.execute(() => new InstQueue, manager) {
+        c => new InstQTest(c)
+      }
+    },
+    "IssueQueue" -> {manager: TesterOptionsManager =>
+      Driver.execute(() => new IssueQueue, manager) {
+        c => new IssueQTest(c)
       }
     },
     "LoadStore" -> {manager: TesterOptionsManager =>

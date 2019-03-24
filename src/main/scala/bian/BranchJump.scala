@@ -55,13 +55,13 @@ class BranchJump extends Module with BjParam {
     val b_commit = Output(Valid(UInt(wOrder.W)))
   })
 
-  val predTable = RegInit(VecInit(Seq.fill(nEntry) {
+  val pred_table = RegInit(VecInit(Seq.fill(nEntry) {
     val w = Wire(Valid(new BrchjrPred(wOrder, data_width)))
     w.valid := false.B
     w.bits := DontCare
     w
   }))
-  val predQueue = RegInit(VecInit(Seq.fill(nEntry) {
+  val pred_queue = RegInit(VecInit(Seq.fill(nEntry) {
     val w = Wire(new BrjrIssue(wOrder, wEntry))
     w.valid  := false.B
     w.id     := DontCare
@@ -70,7 +70,7 @@ class BranchJump extends Module with BjParam {
     w.bidx   := DontCare
     w
   }))
-  val predCount = RegInit(0.U(wCount.W))
+  val pred_count = RegInit(0.U(wCount.W))
   val pred_ctrl = Wire(new Bundle {
     val inc_head = Bool()
 
@@ -100,54 +100,46 @@ class BranchJump extends Module with BjParam {
     val predict = Vec(2, new BrchjrPred(wOrder, data_width))
 
     val next_count = UInt(wEntry.W)
+    val tail = UInt(wEntry.W)
+    val bidx = UInt(wEntry.W)
     val buffered = Vec(nEntry, Vec(3, Bool()))
   })
   io.bReady := pred_ctrl.table_empty.orR || pred_ctrl.inc_head
 
   pred_ctrl.inc_head    := !pred_ctrl.queue_empty || pred_ctrl.branch.reduce(_||_)
-  pred_ctrl.queue_empty := predQueue.map(!_.valid).reduce(_&&_)
-  pred_ctrl.table_empty := VecInit(predTable.map(!_.valid)).asUInt
+  pred_ctrl.queue_empty := pred_queue.map(!_.valid).reduce(_&&_)
+  pred_ctrl.table_empty := VecInit(pred_table.map(!_.valid)).asUInt
 
   io.bidx1H := Mux(pred_ctrl.inc_head, Mux(pred_ctrl.queue_empty, pred_ctrl.table_bid1H,
     UIntToOH(pred_ctrl.fwd_issue.bidx)), PriorityEncoderOH(pred_ctrl.table_empty))
+  pred_ctrl.bidx := Mux(pred_ctrl.inc_head, Mux(pred_ctrl.queue_empty, OHToUInt(pred_ctrl.table_bid1H),
+    pred_ctrl.fwd_issue.bidx), PriorityEncoder(pred_ctrl.table_empty))
 
   for (i <- 0 until nEntry) when (io.bidx1H(i)) {
     when (io.inc_tail) {
-      predTable(i).bits  := io.pred_i
+      pred_table(i).bits  := io.pred_i
     }
   }
   for (i <- 0 until nEntry) when (io.xcpt ||
-    (CmpId(io.kill.id, predTable(i).bits.id, io.id_head) && io.kill.valid)) {
-      predTable(i).valid := false.B
+    (CmpId(io.kill.id, pred_table(i).bits.id, io.id_head) && io.kill.valid)) {
+      pred_table(i).valid := false.B
   }.elsewhen (io.bidx1H(i)) {
     when (io.inc_tail) {
-      predTable(i).valid := true.B
+      pred_table(i).valid := true.B
     }.elsewhen(pred_ctrl.inc_head) {
-      predTable(i).valid := false.B
+      pred_table(i).valid := false.B
     }
   }
 
-  pred_ctrl.next_count := Mux(pred_ctrl.inc_head, predCount - 1.U, predCount)
-  when (io.xcpt) {predCount := 0.U
-  }.elsewhen(io.kill.valid) { predCount := pred_ctrl.fwd_ptr
-  }.elsewhen (io.inc_tail) { when (!pred_ctrl.inc_head) {predCount := predCount + 1.U}
-  }.otherwise {predCount := pred_ctrl.next_count}
-
-  when (io.inc_tail) {
-    predQueue(pred_ctrl.next_count).valid := false.B
-    predQueue(pred_ctrl.next_count).id := io.pred_i.id
-    predQueue(pred_ctrl.next_count).branch := io.pred_i.branch
-  }
-
-  pred_ctrl.table_idcam := io.issue.map(i => VecInit(predTable.map(t => t.bits.id === i.id && t.valid)).asUInt)
-  pred_ctrl.queue_idcam := io.issue.map(i => PriorityEncoder(VecInit(predQueue.map(q => q.id === i.id)).asUInt)) //FIXME
+  pred_ctrl.table_idcam := io.issue.map(i => VecInit(pred_table.map(t => t.bits.id === i.id && t.valid)).asUInt)
+  pred_ctrl.queue_idcam := io.issue.map(i => PriorityEncoder(VecInit(pred_queue.map(q => q.id === i.id)).asUInt)) //FIXME
   pred_ctrl.table_bid1H := Mux1H(pred_ctrl.br_oldest, pred_ctrl.table_idcam)
 
-  io.br_type := pred_ctrl.table_idcam.map(i => Mux1H(i, predTable.map(_.bits.br_type)))
-  pred_ctrl.expect := pred_ctrl.table_idcam.map(i => Mux1H(i, predTable.map(_.bits.redirect)))
+  io.br_type := pred_ctrl.table_idcam.map(i => Mux1H(i, pred_table.map(_.bits.br_type)))
+  pred_ctrl.expect := pred_ctrl.table_idcam.map(i => Mux1H(i, pred_table.map(_.bits.redirect)))
   for (j <- 0 until 3) {
-    pred_ctrl.branch(j) := Mux1H(pred_ctrl.table_idcam(j), predTable.map(_.bits.branch))  && io.issue(j).valid
-    pred_ctrl.jumprg(j) := Mux1H(pred_ctrl.table_idcam(j), predTable.map(!_.bits.branch)) && io.issue(j).valid
+    pred_ctrl.branch(j) := Mux1H(pred_ctrl.table_idcam(j), pred_table.map(_.bits.branch))  && io.issue(j).valid
+    pred_ctrl.jumprg(j) := Mux1H(pred_ctrl.table_idcam(j), pred_table.map(!_.bits.branch)) && io.issue(j).valid
     pred_ctrl.actual(j) := pred_ctrl.branch(j) && io.issue(j).actual
     pred_ctrl.b_kill(j) := (pred_ctrl.expect(j) ^ io.issue(j).actual) && pred_ctrl.branch(j)
     io.val_mask(j) := (!(pred_ctrl.br_oldest(j) && pred_ctrl.queue_empty) && pred_ctrl.table_idcam(j).orR) || pred_ctrl.jumprg(j)
@@ -165,45 +157,67 @@ class BranchJump extends Module with BjParam {
   pred_ctrl.issue_kill   := Mux1H(pred_ctrl.br_oldest, pred_ctrl.b_kill)
 
   pred_ctrl.queue_ptr(0):= Mux1H(pred_ctrl.br_oldest, pred_ctrl.queue_idcam)
-  pred_ctrl.queue_ptr(1):= PriorityEncoder(predQueue.map(_.valid))
-  pred_ctrl.predict(0):= Mux1H(pred_ctrl.table_bid1H, predTable).bits
-  pred_ctrl.fwd_issue := predQueue(pred_ctrl.queue_ptr(1))
-  pred_ctrl.predict(1):= predTable(pred_ctrl.fwd_issue.bidx).bits
+  pred_ctrl.queue_ptr(1):= PriorityEncoder(pred_queue.map(_.valid))
+  pred_ctrl.predict(0):= Mux1H(pred_ctrl.table_bid1H, pred_table).bits
+  pred_ctrl.fwd_issue := pred_queue(pred_ctrl.queue_ptr(1))
+  pred_ctrl.predict(1):= pred_table(pred_ctrl.fwd_issue.bidx).bits
 
+  def updateQueue(i: Int): Unit = {
+    when (pred_ctrl.buffered(i).reduce(_||_)) {
+      pred_queue(i).valid  := true.B
+      pred_queue(i).actual := (0 until 3).map(j => io.issue(j).actual && pred_ctrl.buffered(i)(j)).reduce(_||_)
+    }
+  }
   for (i <- 0 until nEntry) {
-    when (io.xcpt) {
-      predQueue(i).valid  := true.B
-    }.elsewhen (pred_ctrl.fwd_ptr < i.U && i.U < predCount) {
-      if (i > 0) {
-        when (io.kill.valid) {
-          predQueue(i-1).valid  := false.B
-        }.elsewhen (pred_ctrl.inc_head) {
-          predQueue(i-1).id := predQueue(i).id
-          predQueue(i-1).bidx := predQueue(i).bidx
-          predQueue(i-1).branch := predQueue(i).branch
-          when (pred_ctrl.buffered(i).reduce(_||_)) {
-            predQueue(i-1).valid  := true.B
-            predQueue(i-1).actual := (0 until 3).map(j => io.issue(j).actual && pred_ctrl.buffered(i)(j)).reduce(_||_)
+    when (io.xcpt) { pred_queue(i).valid  := false.B
+    }.elsewhen (!pred_ctrl.inc_head) { updateQueue(i)
+    }.otherwise{
+      when (i.U < pred_ctrl.fwd_ptr) { updateQueue(i)
+      }.elsewhen (i.U < pred_ctrl.tail) {
+        if (i < nEntry-1) {
+          when (io.kill.valid) {pred_queue(i).valid  := false.B
           }.otherwise {
-            predQueue(i-1).valid  := predQueue(i).valid
-            predQueue(i-1).actual := predQueue(i).actual
+            pred_queue(i).id := pred_queue(i + 1).id
+            pred_queue(i).bidx := pred_queue(i + 1).bidx
+            pred_queue(i).branch := pred_queue(i + 1).branch
+            when (pred_ctrl.buffered(i + 1).reduce(_||_)) {
+              pred_queue(i).valid  := true.B
+              pred_queue(i).actual := (0 until 3).map(j => io.issue(j).actual && pred_ctrl.buffered(i+1)(j)).reduce(_||_)
+            }.otherwise {
+              pred_queue(i).valid  := pred_queue(i + 1).valid
+              pred_queue(i).actual := pred_queue(i + 1).actual
+            }
           }
         }
       }
-    }.elsewhen (pred_ctrl.buffered(i).reduce(_||_)) {
-      predQueue(i).valid  := true.B
-      predQueue(i).actual := (0 until 3).map(j => io.issue(j).actual && pred_ctrl.buffered(i)(j)).reduce(_||_)
-    }
-
-    for (j <- 0 until 3) {
-      pred_ctrl.buffered(i)(j) := io.issue(j).valid && io.issue(j).id === predQueue(i).id &&
-        (!(pred_ctrl.br_oldest(j) && pred_ctrl.queue_empty) || !predQueue(i).branch)
-      when (pred_ctrl.table_idcam(j)(i)) { //if is jalr
-        when (pred_ctrl.jumprg(j)) {predTable(i).bits.cont := io.jr_tgt(j)}
-      }
     }
   }
-  io.cd_link := (0 until 3).map(j => Mux1H(pred_ctrl.table_idcam(j), predTable.map(_.bits.cont)))
+
+  pred_ctrl.tail := (pred_count - 1.U)(wEntry-1,0)
+  pred_ctrl.next_count := Mux(pred_ctrl.inc_head, pred_ctrl.tail, pred_count(wEntry-1,0))
+  when (io.xcpt) {pred_count := 0.U
+  }.elsewhen(io.kill.valid) { pred_count := pred_ctrl.fwd_ptr
+  }.elsewhen (io.inc_tail) { when (!pred_ctrl.inc_head) {pred_count := pred_count + 1.U}
+  }.otherwise {pred_count := pred_ctrl.next_count}
+
+  when (pred_ctrl.inc_head || io.inc_tail) {
+    pred_queue(pred_ctrl.next_count).valid  := false.B
+  }
+  when (io.inc_tail) {
+    pred_queue(pred_ctrl.next_count).id     := io.pred_i.id
+    pred_queue(pred_ctrl.next_count).branch := io.pred_i.branch
+    pred_queue(pred_ctrl.next_count).bidx   := pred_ctrl.bidx
+  }
+
+  for (i <- 0 until nEntry; j <- 0 until 3) {
+    pred_ctrl.buffered(i)(j) := io.issue(j).valid && io.issue(j).id === pred_queue(i).id &&
+      (!(pred_ctrl.br_oldest(j) && pred_ctrl.queue_empty) || !pred_queue(i).branch)
+    when (pred_ctrl.table_idcam(j)(i)) { //if is jalr
+      when (pred_ctrl.jumprg(j)) {pred_table(i).bits.cont := io.jr_tgt(j)}
+    }
+  }
+
+  io.cd_link := (0 until 3).map(j => Mux1H(pred_ctrl.table_idcam(j), pred_table.map(_.bits.cont)))
 
   pred_ctrl.fwd_ptr := Mux(pred_ctrl.queue_empty, pred_ctrl.queue_ptr(0), pred_ctrl.queue_ptr(1))
   io.fb_pc := Mux(pred_ctrl.queue_empty, pred_ctrl.predict(0).pc, pred_ctrl.predict(1).pc)
