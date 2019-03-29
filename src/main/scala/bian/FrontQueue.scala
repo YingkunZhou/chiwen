@@ -4,18 +4,6 @@ import chisel3._
 import chisel3.util.{Cat, Valid, isPow2, log2Ceil}
 import common.CPUConfig
 
-trait Pram {
-  val nPhyAddr = 60
-  val nOrder   = 32
-  require(isPow2(nOrder))
-  val data_width = 32
-  val wPhyAddr = log2Ceil(nPhyAddr)
-  val wOrder   = log2Ceil(nOrder)
-  val nCommit  = 4
-  val nBrchjr  = 4
-  val nInst    = 2
-}
-
 trait FrontParam {
   val nEntry  = 16
   require(isPow2(nEntry))
@@ -37,7 +25,8 @@ class FrontQueue(implicit val conf: CPUConfig) extends Module with FrontParam {
 
     val inst_i  = Input(Vec(conf.nInst, Valid(UInt(conf.inst_width.W))))
     val pred_i  = Input(new PredictInfo(conf.data_width))
-    val split_i = Input(Bool())
+    val inst_split = Input(Bool())
+    val pc_split   = Input(Bool())
 
     val inst_o  = Output(Vec(conf.nInst, Valid(UInt(conf.inst_width.W))))
     val pred_o  = Output(new PredictInfo(conf.data_width))
@@ -48,21 +37,18 @@ class FrontQueue(implicit val conf: CPUConfig) extends Module with FrontParam {
     val ready = Input(Vec(conf.nInst, Bool()))
   })
 
-//  def next(ptr: UInt, nEntry: Int): UInt = {
-//    if (isPow2(nEntry)) ptr + 1.U
-//    else Mux(ptr === (nEntry-1).U, 0.U, ptr + 1.U)
-//  }
+  def next(ptr: UInt, nEntry: Int): UInt = {
+    if (isPow2(nEntry)) ptr + 1.U
+    else Mux(ptr === (nEntry-1).U, Cat(1.U(1.W), 0.U(log2Ceil(nEntry).W)), ptr + 1.U)
+  }
 
-  val flush: Bool = io.xcpt.valid || io.kill.valid
-  val out_fire:  Bool = (!io.inst_o(0).valid || io.ready(0)) &&
-    (!io.inst_o(1).valid || io.ready(1) || io.split_o)
-  val out_valid: Bool = io.inst_o.map(_.valid).reduce(_||_)
-  val in_valid:  Bool = io.inst_i.map(_.valid).reduce(_||_)
+  val flush = io.xcpt.valid || io.kill.valid
+  val out_fire = (!io.inst_o(0).valid || io.ready(0)) && (!io.inst_o(1).valid || io.ready(1) || io.split_o)
+  val out_valid = io.inst_o.map(_.valid).reduce(_||_)
+  val in_valid = io.inst_i.map(_.valid).reduce(_||_)
 
-  val instQueue = Mem(nEntry, Vec(conf.nInst, Valid(UInt(conf.inst_width.W))))
-  val predQueue = Mem(nEntry, new PredictInfo(conf.data_width))
-  val instQ_ptr = RegInit(VecInit(Seq.fill(2)(0.U((wEntry+1).W))))
-  val predQ_ptr = RegInit(VecInit(Seq.fill(2)(0.U((wEntry+1).W))))
+  def Nfull(ptr: Vec[UInt], w: Int): Bool = ptr(H)(w-1,0) =/= ptr(T)(w-1,0) || ptr(H)(w) === ptr(T)(w)
+
   val inst = RegInit(VecInit(Seq.fill(conf.nInst) {
     val w = Wire(Valid(UInt(conf.inst_width.W)))
     w.valid := false.B
@@ -71,87 +57,101 @@ class FrontQueue(implicit val conf: CPUConfig) extends Module with FrontParam {
   }))
   io.inst_o := inst
 
-  def Nfull(head: UInt, tail: UInt, w: Int): Bool =
-    head(w-1,0) =/= tail(w-1,0) || head(w) === tail(w)
-  io.forward := Nfull(instQ_ptr(H), instQ_ptr(T), wEntry)
+  val instQ_ptr = RegInit(VecInit(Seq.fill(2)(0.U((wEntry+1).W))))
+  val instQ_nEmpty = instQ_ptr(H) =/= instQ_ptr(T)
+  val inst_inc = Wire(Vec(2, Bool()))
+  inst_inc(H) := out_fire && instQ_nEmpty
+  inst_inc(T) := in_valid && io.forward && (!out_fire || instQ_nEmpty)
+  io.forward := Nfull(instQ_ptr, wEntry)
 
-  val instQ_inc = Wire(Vec(2, Bool()))
-  val instQ_empty: Bool = instQ_ptr(H) === instQ_ptr(T)
-  instQ_inc(H) := out_fire && !instQ_empty
-  instQ_inc(T) := in_valid && io.forward && !(out_fire && instQ_empty)
-
-  when(flush) { instQ_ptr(T) := instQ_ptr(H)
-  }.elsewhen (instQ_inc(T)) { instQ_ptr(T) := instQ_ptr(T) + 1.U }
-
-  when (!flush && instQ_inc(H)) {instQ_ptr(H) := instQ_ptr(H) + 1.U}
-
+  val instQueue = Mem(nEntry, Vec(conf.nInst, Valid(UInt(conf.inst_width.W))))
   when (flush) {
     for (i <- 0 until conf.nInst)
       inst(i).valid := false.B
-  }.elsewhen(instQ_inc(H)) {
+  }.elsewhen(inst_inc(H)) {
     inst := instQueue(instQ_ptr(H)(wEntry-1,0))
-  }.elsewhen(out_fire && in_valid) {
+  }.elsewhen(out_fire) { //FIXME: is it lose energy???
     inst := io.inst_i
   }.elsewhen(io.ready(0)) {
     inst(0).valid := false.B
   }
 
-  val predQ_inc = Wire(Vec(2, Bool()))
-  val predQ_empty: Bool = predQ_ptr(H) === predQ_ptr(T)
-  val predQ_ready: Bool = Nfull(predQ_ptr(H), predQ_ptr(T), wEntry)
-  val pred_valid = RegInit(false.B)
+  when(inst_inc(T)) {instQueue(instQ_ptr(T)(wEntry-1,0)) := io.inst_i}
 
-  predQ_inc(T) := pred_valid && predQ_ready && !(out_fire && predQ_empty)
-  predQ_inc(H) := out_fire && !predQ_empty
+  when(flush) { instQ_ptr(T) := instQ_ptr(H)
+  }.elsewhen (inst_inc(T)) { instQ_ptr(T) := instQ_ptr(T) + 1.U }
 
-  when(flush) {pred_valid := false.B
-  }.elsewhen(in_valid && io.forward) {pred_valid := true.B
-  }.elsewhen(predQ_inc(T)) {pred_valid := false.B}
+  when (!flush && inst_inc(H)) {instQ_ptr(H) := instQ_ptr(H) + 1.U}
 
+  val pred_ctrl = RegInit({
+    val w = Wire(new Bundle {
+      val valid = Bool()
+      val ptr = Vec(2, UInt((wEntry+1).W))
+      val inst_split = Vec(nEntry, Bool())
+      val pc_split   = Vec(nEntry, Bool())
+      def nEmpty: Bool = ptr(H) =/= ptr(T)
+      def empty: Bool  = ptr(H) === ptr(T)
+    })
+    w.valid := false.B
+    w.ptr := Seq.fill(2)(0.U((wEntry+1).W))
+    w.inst_split := DontCare
+    w.pc_split := DontCare
+    w
+  })
 
-  when(flush) {predQ_ptr(T) := predQ_ptr(H)
-  }.elsewhen (predQ_inc(T)) {predQ_ptr(T) := predQ_ptr(T) + 1.U}
+  val pred_inc = Wire(Vec(2, Bool()))
+  pred_inc(H) := out_fire && pred_ctrl.nEmpty
+  pred_inc(T) := pred_ctrl.valid && Nfull(pred_ctrl.ptr, wEntry) && (!out_fire || pred_ctrl.nEmpty)
 
-  when(!flush && predQ_inc(H)) {predQ_ptr(H) := predQ_ptr(H) + 1.U}
+  when(flush) {pred_ctrl.valid := false.B
+  }.elsewhen(in_valid && io.forward) {pred_ctrl.valid := true.B
+  }.elsewhen(pred_inc(T)) {pred_ctrl.valid := false.B}
 
-  val pred = predQueue(predQ_ptr(H)(wEntry-1,0))
-  io.pred_o  := Mux(predQ_empty, io.pred_i , pred)
-  val splitQueue = Reg(Vec(nEntry, Bool()))
-  val split = splitQueue(predQ_ptr(H)(wEntry-1,0))
-  io.split_o := Mux(predQ_empty, io.split_i, split)
+  val predQueue = Mem(nEntry, new PredictInfo(conf.data_width))
+  when(pred_inc(T)) {
+    predQueue(pred_ctrl.ptr(T)(wEntry-1,0)) := io.pred_i
+    pred_ctrl.inst_split(pred_ctrl.ptr(T)(wEntry-1,0)) := io.inst_split
+    pred_ctrl.pc_split(pred_ctrl.ptr(T)(wEntry-1,0)) := io.pc_split && !io.inst_split
+  }
+
+  when(flush) {pred_ctrl.ptr(T) := pred_ctrl.ptr(H)
+  }.elsewhen (pred_inc(T)) {pred_ctrl.ptr(T) := pred_ctrl.ptr(T) + 1.U}
+
+  when(!flush && pred_inc(H)) {pred_ctrl.ptr(H) := pred_ctrl.ptr(H) + 1.U}
 
   val pc = RegInit(START_ADDR)
-  val redirect: Bool = !predQ_empty && pred.brchjr(0) && inst(0).valid && pred.redirect
-  io.pc(0) := Cat(pc(conf.inst_width-1, conf.pcLSB+1), 0.U(1.W), 0.U(conf.pcLSB))
-  io.pc(1) := Mux(redirect, pred.tgt, Cat(pc(conf.inst_width-1, conf.pcLSB+1), 1.U(1.W), 0.U(conf.pcLSB)))
+  val pred = predQueue(pred_ctrl.ptr(H)(wEntry-1,0))
+  val pc_split: Bool = pred_ctrl.nEmpty && pred_ctrl.pc_split(pred_ctrl.ptr(H)(wEntry-1,0))
+  io.pred_o  := Mux(pred_ctrl.nEmpty, pred, io.pred_i)
+  io.split_o := Mux(pred_ctrl.nEmpty, pred_ctrl.inst_split(pred_ctrl.ptr(H)(wEntry-1,0)), io.inst_split)
+  io.pc(0) :=
+    Cat(pc(conf.inst_width-1, conf.pcLSB+1), 0.U(1.W), 0.U(conf.pcLSB.W))
+  io.pc(1) := Mux(pc_split, pred.tgt,
+    Cat(pc(conf.inst_width-1, conf.pcLSB+1), 1.U(1.W), 0.U(conf.pcLSB.W)))
 
   when(io.xcpt.valid) {
     pc := io.xcpt.bits
   }.elsewhen(io.kill.valid) {
     pc := io.kill.bits
   }.elsewhen(out_fire && out_valid) {
-    when (redirect && !split && inst(1).valid) {
-      pc := pred.tgt + 4.U
-    }.elsewhen(io.pred_o.redirect &&
-      (0 until conf.nInst).map(i => io.pred_o.brchjr(i) && inst(i).valid).reduce(_||_)) {
+    when (io.pred_o.redirect && !pc_split) {
       pc := io.pred_o.tgt
-    }.otherwise {
-      pc := pc + 8.U
+    }.elsewhen (inst(1).valid) {
+      pc := io.pc(1) + 4.U
+    }.elsewhen(inst(0).valid) {
+      pc := Cat(pc(conf.inst_width-1, conf.pcLSB+1), 1.U(1.W), 0.U(conf.pcLSB.W))
     }
   }
-  // buffered
-  when(instQ_inc(T)) {
-    instQueue(instQ_ptr(T)(wEntry-1,0)) := io.inst_i
-  }
-  when(predQ_inc(T)) {
-    predQueue(predQ_ptr(T)(wEntry-1,0)) := io.pred_i
-    splitQueue(predQ_ptr(T)(wEntry-1,0)) := io.split_i
-  }
 
-//  printf(p"ptr $ptr full $full flush $flush ptr_inc $ptr_inc [ptr_next ${ptr_next(0)} ${ptr_next(1)}] " +
-//    p"[inst ${inst(0).valid}: ${inst(0).bits} ${inst(1).valid}: ${inst(1).bits}] ready ${io.ready}\n" +
-//    p"[inst ${io.inst_i(0).valid}: ${io.inst_i(0).bits} ${io.inst_i(1).valid}: ${io.inst_i(1).bits}] " +
-//    p"out_valid $out_valid out_fire $out_fire in_valid $in_valid forward ${io.forward} pc ${Hexadecimal(pc)}\n" +
-//    p"ptr ${pred_ctrl.ptr} empty ${pred_ctrl.empty} valid ${pred_ctrl.valid} " +
-//    p"ptr_inc $pred_ptr_inc ptr_next ${pred_ptr_next(0)} ${pred_ptr_next(1)}\n\n")
+//  printf(p"out_fire $out_fire out_valid $out_valid in_valid $in_valid inst0 ${io.inst_o(0).valid}:${io.inst_o(0).bits} inst1 " +
+//    p"${io.inst_o(1).valid}:${io.inst_o(1).bits}\n")
+//  printf(p"inst [head ptr ${instQ_ptr(H)} inc ${inst_inc(H)} | tail ptr ${instQ_ptr(T)} inc ${inst_inc(T)}]\n" +
+//         p"pred [head ptr ${pred.ptr(H)} inc ${pred_inc(H)} | tail ptr ${pred.ptr(T)} inc ${pred_inc(T)}]\n")
+//  printf(p"io [pc0 ${io.pc(0)} inst0 ${io.inst_o(0).valid}:${io.inst_o(0).bits} | pc1 ${io.pc(1)} inst1 ${io.inst_o(1).valid}:${io.inst_o(1).bits}] " +
+//    p"io.pred: [tgt ${io.pred_o.tgt}] redirect ${io.pred_o.redirect} brchjr ${io.pred_o.brchjr} io.split: ${io.split_o}\n")
+//  printf(p"pred_valid ${pred.valid}  pc $pc redirect $pc_split pred_tgt ${predt.tgt}\n")
+//
+//  val cnt = RegInit(0.U(32.W))
+//  cnt := cnt + 1.U
+//  printf(p"=======================cnt = $cnt=============================\n")
 }
