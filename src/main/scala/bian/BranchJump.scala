@@ -3,13 +3,13 @@ package bian
 import chisel3._
 import chisel3.util._
 
-trait BjParam extends Pram {
+trait BjParam extends BackParam {
   val nEntry = nBrchjr
   val wEntry = log2Ceil(nEntry)
   val wCount = log2Ceil(nEntry+1)
 }
 
-class BrchjrPred(val id_width: Int, data_width: Int) extends Predict(data_width) {
+class BrjrEntryIO(val id_width: Int, data_width: Int) extends Predict(data_width) {
   val id = UInt(id_width.W)
   val pc = UInt(data_width.W)
   val cont = UInt(data_width.W)
@@ -18,229 +18,232 @@ class BrchjrPred(val id_width: Int, data_width: Int) extends Predict(data_width)
   val br_type = UInt(BR_N.getWidth.W)
 }
 
+class BrjrEntry(val data_width: Int) extends Bundle {
+  val expect = Bool()
+  val jump = UInt(Jump.NUM.W)
+  val pc  = UInt(data_width.W)
+  val tgt = UInt(data_width.W)
+}
+
 class BrjrIssueIO(val id_width: Int) extends Bundle {
   val valid = Bool()
   val id = UInt(id_width.W)
   val actual = Bool() // = 0 cont || = 1 jump
+  val branch = Bool() //TODO: add all
 }
 
 class BrjrIssue(id_width: Int, val wEntry: Int) extends BrjrIssueIO(id_width) {
-  val branch = Bool()
-  val bidx = UInt(wEntry.W)
+  val bidx = UInt(wEntry.W) //used to index table
 }
 
 class BranchJump extends Module with BjParam {
   val io = IO(new Bundle {
-    val pred_i = Input(new BrchjrPred(wOrder, data_width))
-    val bidx1H = Output(UInt(nEntry.W)) //alloc
-    val bReady = Output(Bool())
-    val inc_tail = Input(Bool())
+    val in = Flipped(DecoupledIO(new BrjrEntryIO(wOrder, data_width)))
+    val bid1H = Output(UInt(nEntry.W)) //alloc
+    val issue = Input(Vec(3, new BrjrIssueIO(wOrder)))
 
-    val issue   = Input(Vec(3, new BrjrIssueIO(wOrder)))
+    val target  = Input(Vec(3, UInt(data_width.W)))
     val br_type = Output(Vec(3, UInt(BR_N.getWidth.W)))
-    val jr_tgt  = Input(Vec(3, UInt(data_width.W)))
     val cd_link = Output(Vec(3, UInt(data_width.W)))
-    val id_head = Input(UInt(wOrder.W))
 
-    val feedback = Output(Valid(new Predict(data_width)))
-    val fb_pc    = Output(UInt(data_width.W))
-    val fb_type  = Output(UInt(BTBType.SZ.W))
+    val head_id = Input(UInt(wOrder.W))
+    val xcpt = Input(Bool())
+    val kill = Output(new KillInfo(wOrder, nEntry))
+    val mask = Output(Vec(3, Bool())) //FIXME: really need mask signal???
+    val commit = Output(Valid(UInt(wOrder.W)))
+
+    val fb = Output(Valid(new Predict(data_width)))
+    val fb_pc = Output(UInt(data_width.W))
+    val fb_type = Output(UInt(BTBType.SZ.W))
     //TODO:
 //    val ras_pop  = Output(Bool())
 //    val ras_push = Output(Valid(UInt(data_width.W)))
-    val xcpt = Input(Bool())
-    val kill = Output(new KillInfo(wOrder, nEntry))
-    //commit associate logic
-    val val_mask = Output(Vec(3, Bool()))
-    val b_commit = Output(Valid(UInt(wOrder.W)))
   })
-
-  val pred_table = RegInit(VecInit(Seq.fill(nEntry) {
-    val w = Wire(Valid(new BrchjrPred(wOrder, data_width)))
+  val table_valid = RegInit(VecInit(Seq.fill(nEntry){
+    val w = Wire(Valid(UInt(wOrder.W)))
     w.valid := false.B
     w.bits := DontCare
     w
   }))
-  val pred_queue = RegInit(VecInit(Seq.fill(nEntry) {
-    val w = Wire(new BrjrIssue(wOrder, wEntry))
-    w.valid  := false.B
-    w.id     := DontCare
-    w.actual := DontCare
-    w.branch := DontCare
-    w.bidx   := DontCare
-    w
-  }))
-  val pred_count = RegInit(0.U(wCount.W))
-  val pred_ctrl = Wire(new Bundle {
-    val inc_head = Bool()
+  val cd_link = Reg(Vec(nEntry, UInt(data_width.W)))
+  val br_type = Reg(Vec(nEntry, UInt(BR_N.getWidth.W)))
+  val bj_table = Mem(nEntry, new BrjrEntry(data_width))
+  val queue_valid = RegInit(VecInit(Seq.fill(nEntry)(false.B)))
+  val bj_queue = Reg(Vec(nEntry, new BrjrIssue(wOrder, wEntry)))
 
-    val table_empty = UInt(nEntry.W)
-    val table_idcam = Vec(3, UInt(nEntry.W))
-    val table_bid1H = UInt(nEntry.W)
+  val bj_count = RegInit(0.U(wCount.W))
+  val bj_ctrl = Wire(new Bundle {
+    val head_id = UInt(wOrder.W) /*reorder buffer head id, the first inst*/
+    val issue_id = Vec(3, UInt(wOrder.W)) /*input issue id in exe stage*/
+    val empty = UInt(nEntry.W) /*table empty vector*/
+    val table_idcam = Vec(3, UInt(nEntry.W)) /*table id cam result*/
+    def valid(i: Int): Bool = table_idcam(i).orR /*whether input issue is branch or jump inst*/
+    val queue_idcam = Vec(3, UInt(nEntry.W)) /*queue id cam result*/
 
-    val queue_empty = Bool()
-    val queue_idcam = Vec(3, UInt(wEntry.W))
-    val queue_ptr = Vec(2, UInt(wEntry.W))
+    val branch = Vec(3, Bool()) /*whether input issue is branch inst*/
+    def branch_acc: Bool = branch.reduce(_||_) /*branch accelerate signal*/
+    val wire_actual = Bool() /*the branch actual direction*/
 
-    val expect = Vec(3, Bool())
-    val branch = Vec(3, Bool())
-    val jumprg = Vec(3, Bool())
-    val actual = Vec(3, Bool())
-    val b_kill = Vec(3, Bool())
+    val pop_valid = Bool() /*whether queue is empty or not*/
+    val pop_issue = new BrjrIssue(wOrder, wEntry) /*pop entry of queue*/
+    val pop_qptr = UInt(wEntry.W) /*pop ptr of queue*/
 
-    val issue_cmp = Vec(3, Bool())
-    val br_oldest = Vec(3, Bool())
+    val tail = UInt(wCount.W) /*the last one position of queue*/
+    val actual = Vec(nEntry, Bool()) /*the update actual bit*/
+    val update = Vec(nEntry, Bool()) /*queue update vector signal*/
+    val table_kill = Vec(nEntry, Bool()) /*table kill vector*/
+    /*issue valid mask signal, is sequence logic not comb logic, need to push to queue first*/
+    def mask(i: Int, is_branch: Bool): Bool = valid(i) && (!order(i) || pop_valid || !is_branch)
 
-    val issue_id = UInt(wOrder.W)
-    val issue_actual = Bool()
-    val issue_kill = Bool()
+    def cmp01: Bool = CmpId(issue_id(0), issue_id(1), head_id) && branch(0) || !branch(1)
+    def cmp02: Bool = CmpId(issue_id(0), issue_id(2), head_id) && branch(0) || !branch(2)
+    def cmp12: Bool = CmpId(issue_id(1), issue_id(2), head_id) && branch(1) || !branch(2)
+    def order: Seq[Bool] = Seq(cmp01 && cmp02, !cmp01 && cmp12, !cmp02 && !cmp12) /*branch order*/
 
-    val fwd_ptr = UInt(wEntry.W)
-    val fwd_issue = new BrjrIssue(wOrder, wEntry)
-    val predict = Vec(2, new BrchjrPred(wOrder, data_width))
-
-    val next_count = UInt(wEntry.W)
-    val tail = UInt(wEntry.W)
-    val bidx = UInt(wEntry.W)
-    val buffered = Vec(nEntry, Vec(3, Bool()))
+    val pop_entry  = new BrjrEntry(data_width) /*pop entry out of the table*/
+    val push_entry = new BrjrEntry(data_width) /*push entry into the table*/
+    val fwd_target = UInt(data_width.W) /*the target besides pop_entry.tgt*/
+    /*entry pop out of queue and invalidate according entry of table*/
+    def forward: Bool     = pop_valid || branch_acc
+    /*forward entry queue ptr*/
+    def fwd_qptr: UInt    = Mux(pop_valid, pop_qptr        , OHToUInt(Mux1H(order, queue_idcam)))
+    /*forward entry table idx and one hot vector*/
+    def fwd_bidx: UInt    = Mux(pop_valid, pop_issue.bidx  , OHToUInt(Mux1H(order, table_idcam)))
+    def fwd_bid1H: UInt   = Mux(pop_valid, UIntToOH(pop_issue.bidx) , Mux1H(order, table_idcam))
+    /*forward inst id*/
+    def fwd_id: UInt      = Mux(pop_valid, pop_issue.id    , Mux1H(order, issue_id))
+    /*forward direction result*/
+    def fwd_actual: Bool  = Mux(pop_valid, pop_issue.actual || !pop_issue.branch, wire_actual && branch_acc)
+    /*forward target*/
+    def fwd_tgt: UInt = Mux(Mux(pop_valid, pop_issue.actual, wire_actual), pop_entry.tgt, fwd_target)
+    /*forward kill signal*/
+    def fwd_kill: Bool    = Mux(pop_valid, Mux(pop_issue.branch, pop_issue.actual ^ pop_entry.expect,
+      pop_entry.tgt =/= fwd_target), (wire_actual ^ pop_entry.expect) && branch_acc)
+    /*forward type*/
+    def fwd_type: UInt   = Mux(!pop_valid || pop_issue.branch, BTBType.branch.U,
+      Mux(pop_entry.jump(Jump.none) || pop_entry.jump(Jump.push), BTBType.jump.U,
+      Mux(pop_entry.jump(Jump.pop), BTBType.retn.U, BTBType.invalid.U)))
+    /*insert moment alloced table idx and its one hot vector*/
+    def bidx: UInt  = Mux(forward, fwd_bidx , PriorityEncoder(empty))
+    def bid1H: UInt = Mux(forward, fwd_bid1H, PriorityEncoderOH(empty))
   })
-  io.bReady := pred_ctrl.table_empty.orR || pred_ctrl.inc_head
+  io.in.ready         := bj_ctrl.empty.orR || bj_ctrl.forward
+  io.bid1H            := bj_ctrl.bid1H
+  io.fb_pc            := bj_ctrl.pop_entry.pc
+  io.fb_type          := bj_ctrl.fwd_type
+  io.fb.valid         := bj_ctrl.forward //is branch jump inst
+  io.fb.bits.redirect := bj_ctrl.fwd_actual
+  io.fb.bits.tgt      := bj_ctrl.fwd_tgt
+  io.kill.valid       := bj_ctrl.fwd_kill
+  io.kill.id          := bj_ctrl.fwd_id
+  io.kill.bidx        := bj_ctrl.fwd_bidx
+  io.commit.valid     := bj_ctrl.pop_valid
+  io.commit.bits      := bj_ctrl.pop_issue.id
+  io.br_type := bj_ctrl.table_idcam.map(i => Mux1H(i, br_type))
+  io.cd_link := bj_ctrl.table_idcam.map(i => Mux1H(i, cd_link))
+  io.mask := (0 until 3).map(i => bj_ctrl.mask(i, io.issue(i).branch))
 
-  pred_ctrl.inc_head    := !pred_ctrl.queue_empty || pred_ctrl.branch.reduce(_||_)
-  pred_ctrl.queue_empty := pred_queue.map(!_.valid).reduce(_&&_)
-  pred_ctrl.table_empty := VecInit(pred_table.map(!_.valid)).asUInt
+  bj_ctrl.head_id     := io.head_id
+  bj_ctrl.issue_id    := io.issue.map(_.id)
+  bj_ctrl.empty       := ~table_valid.asUInt
+  bj_ctrl.table_idcam := io.issue.map(i => VecInit(table_valid.map(t => t.valid && t.bits === i.id)).asUInt)
+  bj_ctrl.queue_idcam := io.issue.map(i => PriorityEncoder(VecInit(bj_queue.map(q => q.id === i.id)).asUInt))
+  bj_ctrl.pop_valid   := queue_valid.reduce(_||_)
+  bj_ctrl.pop_issue   := PriorityMux(queue_valid, bj_queue)
+  bj_ctrl.pop_qptr    := PriorityEncoder(queue_valid)
+  bj_ctrl.pop_entry   := bj_table(bj_ctrl.fwd_bidx)
+  bj_ctrl.wire_actual := Mux1H(bj_ctrl.order, io.issue.map(_.actual))
+  bj_ctrl.branch      := io.issue.map(i => i.valid && i.branch)
+  bj_ctrl.fwd_target  := Mux1H(bj_ctrl.fwd_bid1H, cd_link)
 
-  io.bidx1H := Mux(pred_ctrl.inc_head, Mux(pred_ctrl.queue_empty, pred_ctrl.table_bid1H,
-    UIntToOH(pred_ctrl.fwd_issue.bidx)), PriorityEncoderOH(pred_ctrl.table_empty))
-  pred_ctrl.bidx := Mux(pred_ctrl.inc_head, Mux(pred_ctrl.queue_empty, OHToUInt(pred_ctrl.table_bid1H),
-    pred_ctrl.fwd_issue.bidx), PriorityEncoder(pred_ctrl.table_empty))
-
-  for (i <- 0 until nEntry) when (io.bidx1H(i)) {
-    when (io.inc_tail) {
-      pred_table(i).bits  := io.pred_i
-    }
-  }
-  for (i <- 0 until nEntry) when (io.xcpt ||
-    (CmpId(io.kill.id, pred_table(i).bits.id, io.id_head) && io.kill.valid)) {
-      pred_table(i).valid := false.B
-  }.elsewhen (io.bidx1H(i)) {
-    when (io.inc_tail) {
-      pred_table(i).valid := true.B
-    }.elsewhen(pred_ctrl.inc_head) {
-      pred_table(i).valid := false.B
-    }
-  }
-
-  pred_ctrl.table_idcam := io.issue.map(i => VecInit(pred_table.map(t => t.bits.id === i.id && t.valid)).asUInt)
-  pred_ctrl.queue_idcam := io.issue.map(i => PriorityEncoder(VecInit(pred_queue.map(q => q.id === i.id)).asUInt)) //FIXME
-  pred_ctrl.table_bid1H := Mux1H(pred_ctrl.br_oldest, pred_ctrl.table_idcam)
-
-  io.br_type := pred_ctrl.table_idcam.map(i => Mux1H(i, pred_table.map(_.bits.br_type)))
-  pred_ctrl.expect := pred_ctrl.table_idcam.map(i => Mux1H(i, pred_table.map(_.bits.redirect)))
-  for (j <- 0 until 3) {
-    pred_ctrl.branch(j) := Mux1H(pred_ctrl.table_idcam(j), pred_table.map(_.bits.branch))  && io.issue(j).valid
-    pred_ctrl.jumprg(j) := Mux1H(pred_ctrl.table_idcam(j), pred_table.map(!_.bits.branch)) && io.issue(j).valid
-    pred_ctrl.actual(j) := pred_ctrl.branch(j) && io.issue(j).actual
-    pred_ctrl.b_kill(j) := (pred_ctrl.expect(j) ^ io.issue(j).actual) && pred_ctrl.branch(j)
-    io.val_mask(j) := (!(pred_ctrl.br_oldest(j) && pred_ctrl.queue_empty) && pred_ctrl.table_idcam(j).orR) || pred_ctrl.jumprg(j)
+  bj_ctrl.push_entry.expect := io.in.bits.redirect
+  bj_ctrl.push_entry.pc     := io.in.bits.pc
+  bj_ctrl.push_entry.jump   := io.in.bits.jump
+  bj_ctrl.push_entry.tgt    := io.in.bits.tgt
+  when (io.in.valid) {
+    bj_table(bj_ctrl.bidx) := bj_ctrl.push_entry
+    cd_link(bj_ctrl.bidx)  := io.in.bits.cont
+    br_type(bj_ctrl.bidx)  := io.in.bits.br_type
   }
 
-  pred_ctrl.issue_cmp(0) := CmpId(io.issue(0).id, io.issue(1).id, io.id_head) && pred_ctrl.branch(0) || !pred_ctrl.branch(1)
-  pred_ctrl.issue_cmp(1) := CmpId(io.issue(0).id, io.issue(2).id, io.id_head) && pred_ctrl.branch(0) || !pred_ctrl.branch(2)
-  pred_ctrl.issue_cmp(2) := CmpId(io.issue(1).id, io.issue(2).id, io.id_head) && pred_ctrl.branch(1) || !pred_ctrl.branch(2)
-  pred_ctrl.br_oldest(0) :=  pred_ctrl.issue_cmp(0) &&  pred_ctrl.issue_cmp(1)
-  pred_ctrl.br_oldest(1) := !pred_ctrl.issue_cmp(0) &&  pred_ctrl.issue_cmp(2)
-  pred_ctrl.br_oldest(2) := !pred_ctrl.issue_cmp(1) && !pred_ctrl.issue_cmp(2)
-
-  pred_ctrl.issue_id     := Mux1H(pred_ctrl.br_oldest, io.issue.map(_.id))
-  pred_ctrl.issue_actual := Mux1H(pred_ctrl.br_oldest, pred_ctrl.actual)
-  pred_ctrl.issue_kill   := Mux1H(pred_ctrl.br_oldest, pred_ctrl.b_kill)
-
-  pred_ctrl.queue_ptr(0):= Mux1H(pred_ctrl.br_oldest, pred_ctrl.queue_idcam)
-  pred_ctrl.queue_ptr(1):= PriorityEncoder(pred_queue.map(_.valid))
-  pred_ctrl.predict(0):= Mux1H(pred_ctrl.table_bid1H, pred_table).bits
-  pred_ctrl.fwd_issue := pred_queue(pred_ctrl.queue_ptr(1))
-  pred_ctrl.predict(1):= pred_table(pred_ctrl.fwd_issue.bidx).bits
-
-  def updateQueue(i: Int): Unit = {
-    when (pred_ctrl.buffered(i).reduce(_||_)) {
-      pred_queue(i).valid  := true.B
-      pred_queue(i).actual := (0 until 3).map(j => io.issue(j).actual && pred_ctrl.buffered(i)(j)).reduce(_||_)
-    }
-  }
+  bj_ctrl.table_kill := table_valid.map(t => bj_ctrl.fwd_kill &&
+    CmpId(bj_ctrl.fwd_id, t.bits, bj_ctrl.head_id))
   for (i <- 0 until nEntry) {
-    when (io.xcpt) { pred_queue(i).valid  := false.B
-    }.elsewhen (!pred_ctrl.inc_head) { updateQueue(i)
-    }.otherwise{
-      when (i.U < pred_ctrl.fwd_ptr) { updateQueue(i)
-      }.elsewhen (i.U < pred_ctrl.tail) {
-        if (i < nEntry-1) {
-          when (io.kill.valid) {pred_queue(i).valid  := false.B
-          }.otherwise {
-            pred_queue(i).id := pred_queue(i + 1).id
-            pred_queue(i).bidx := pred_queue(i + 1).bidx
-            pred_queue(i).branch := pred_queue(i + 1).branch
-            when (pred_ctrl.buffered(i + 1).reduce(_||_)) {
-              pred_queue(i).valid  := true.B
-              pred_queue(i).actual := (0 until 3).map(j => io.issue(j).actual && pred_ctrl.buffered(i+1)(j)).reduce(_||_)
-            }.otherwise {
-              pred_queue(i).valid  := pred_queue(i + 1).valid
-              pred_queue(i).actual := pred_queue(i + 1).actual
-            }
-          }
-        }
+    when (io.xcpt || bj_ctrl.table_kill(i)) {
+      table_valid(i).valid := false.B
+    }.elsewhen (bj_ctrl.bid1H(i)) {
+      when (io.in.valid) {
+        table_valid(i).valid := true.B
+        table_valid(i).bits := io.in.bits.id
+      }.elsewhen(bj_ctrl.forward) {
+        table_valid(i).valid := false.B
       }
     }
   }
 
-  pred_ctrl.tail := (pred_count - 1.U)(wEntry-1,0)
-  pred_ctrl.next_count := Mux(pred_ctrl.inc_head, pred_ctrl.tail, pred_count(wEntry-1,0))
-  when (io.xcpt) {pred_count := 0.U
-  }.elsewhen(io.kill.valid) { pred_count := pred_ctrl.fwd_ptr
-  }.elsewhen (io.inc_tail) { when (!pred_ctrl.inc_head) {pred_count := pred_count + 1.U}
-  }.otherwise {pred_count := pred_ctrl.next_count}
-
-  when (pred_ctrl.inc_head || io.inc_tail) {
-    pred_queue(pred_ctrl.next_count).valid  := false.B
-  }
-  when (io.inc_tail) {
-    pred_queue(pred_ctrl.next_count).id     := io.pred_i.id
-    pred_queue(pred_ctrl.next_count).branch := io.pred_i.branch
-    pred_queue(pred_ctrl.next_count).bidx   := pred_ctrl.bidx
+  bj_ctrl.tail := bj_count - 1.U
+  when (io.xcpt) {bj_count := 0.U
+  }.elsewhen(bj_ctrl.fwd_kill) {bj_count := bj_ctrl.fwd_qptr
+  }.otherwise {
+    when (io.in.valid && !bj_ctrl.forward) {bj_count := bj_count + 1.U}
+    when (!io.in.valid && bj_ctrl.forward) {bj_count := bj_ctrl.tail}
   }
 
-  for (i <- 0 until nEntry; j <- 0 until 3) {
-    pred_ctrl.buffered(i)(j) := io.issue(j).valid && io.issue(j).id === pred_queue(i).id &&
-      (!(pred_ctrl.br_oldest(j) && pred_ctrl.queue_empty) || !pred_queue(i).branch)
-    when (pred_ctrl.table_idcam(j)(i)) { //if is jalr
-      when (pred_ctrl.jumprg(j)) {pred_table(i).bits.cont := io.jr_tgt(j)}
+  def updateQueue(i: Int): Unit = {
+    when (bj_ctrl.update(i)) {
+      queue_valid(i) := true.B
+      bj_queue(i).actual := bj_ctrl.actual(i)
+    }
+  }
+  def stable_queue: Seq[Bool] = (0 until nEntry).map(i => i.U  <  bj_ctrl.fwd_qptr)
+  def shift_queue : Seq[Bool] = (0 until nEntry).map(i => i.U  <  bj_ctrl.tail(wEntry-1,0))
+  def touch_tail  : Seq[Bool] = (0 until nEntry).map(i => i.U === bj_ctrl.tail(wEntry-1,0))
+  def touch_count : Seq[Bool] = (0 until nEntry).map(i => i.U === bj_count(wEntry-1,0))
+  for (i <- 0 until nEntry) {
+    when (bj_ctrl.forward) {
+      when (touch_tail(i) && io.in.valid) {
+        bj_queue(i).id     := io.in.bits.id
+        bj_queue(i).bidx   := bj_ctrl.bidx
+        bj_queue(i).branch := io.in.bits.branch
+        bj_queue(i).valid  := false.B
+      }.elsewhen (stable_queue(i)) {
+        updateQueue(i)
+      }.elsewhen(shift_queue(i) && !bj_ctrl.fwd_kill) { if (i < nEntry-1) {
+        bj_queue(i).id     := bj_queue(i + 1).id
+        bj_queue(i).bidx   := bj_queue(i + 1).bidx
+        bj_queue(i).branch := bj_queue(i + 1).branch
+        bj_queue(i).valid  := bj_queue(i + 1).valid
+        when (bj_ctrl.update(i + 1)) {
+          bj_queue(i).valid  := true.B
+          bj_queue(i).actual := bj_ctrl.actual(i + 1)
+        }.otherwise {
+          bj_queue(i).valid  := bj_queue(i + 1).valid
+          bj_queue(i).actual := bj_queue(i + 1).actual
+        }
+      }}.otherwise {
+        bj_queue(i).valid := false.B
+      }
+    }.otherwise {
+      when (touch_count(i) && io.in.valid) {
+        bj_queue(i).id     := io.in.bits.id
+        bj_queue(i).bidx   := bj_ctrl.bidx
+        bj_queue(i).branch := io.in.bits.branch
+        bj_queue(i).valid  := false.B
+      }.otherwise {
+        updateQueue(i)
+      }
     }
   }
 
-  io.cd_link := (0 until 3).map(j => Mux1H(pred_ctrl.table_idcam(j), pred_table.map(_.bits.cont)))
-
-  pred_ctrl.fwd_ptr := Mux(pred_ctrl.queue_empty, pred_ctrl.queue_ptr(0), pred_ctrl.queue_ptr(1))
-  io.fb_pc := Mux(pred_ctrl.queue_empty, pred_ctrl.predict(0).pc, pred_ctrl.predict(1).pc)
-  io.fb_type := Mux(pred_ctrl.queue_empty, BTBType.branch.U,
-                Mux(pred_ctrl.predict(1).branch, BTBType.branch.U,
-                Mux(pred_ctrl.predict(1).jump(Jump.pop), BTBType.retn.U,
-                Mux(pred_ctrl.predict(1).jump(Jump.none) ||
-                    pred_ctrl.predict(1).jump(Jump.push), BTBType.jump.U, BTBType.invalid.U))))
-  io.kill.valid :=
-    Mux(pred_ctrl.queue_empty, pred_ctrl.issue_kill,
-    Mux(pred_ctrl.fwd_issue.branch, pred_ctrl.fwd_issue.actual ^ pred_ctrl.predict(1).redirect,
-        pred_ctrl.predict(1).tgt =/= pred_ctrl.predict(1).cont
-    ))
-  io.kill.id   := Mux(pred_ctrl.queue_empty, pred_ctrl.issue_id, pred_ctrl.fwd_issue.id)
-  io.kill.bidx := Mux(pred_ctrl.queue_empty, OHToUInt(pred_ctrl.table_bid1H), pred_ctrl.fwd_issue.bidx)
-
-  io.feedback.valid := pred_ctrl.inc_head
-  io.feedback.bits.redirect := Mux(pred_ctrl.queue_empty, pred_ctrl.issue_actual,
-    pred_ctrl.fwd_issue.actual || !pred_ctrl.fwd_issue.branch)
-  io.feedback.bits.tgt := Mux(pred_ctrl.queue_empty,
-    Mux(pred_ctrl.issue_actual, pred_ctrl.predict(0).tgt, pred_ctrl.predict(0).cont),
-    Mux(pred_ctrl.fwd_issue.actual, pred_ctrl.predict(1).tgt, pred_ctrl.predict(1).cont)) //TODO: jalr need not actual to be true
-
-  io.b_commit.valid := !pred_ctrl.queue_empty
-  io.b_commit.bits  :=  pred_ctrl.fwd_issue.id
+  for (i <- 0 until nEntry) {
+    bj_ctrl.update(i) := (0 until 3).map(j => io.issue(j).valid && io.mask(j) && bj_ctrl.queue_idcam(j)(i)).reduce(_||_)
+    bj_ctrl.actual(i) := (0 until 3).map(j => io.issue(j).actual && bj_ctrl.queue_idcam(j)(i)).reduce(_||_)
+    for (j <- 0 until 3) {
+      when (io.issue(j).valid && bj_ctrl.table_idcam(j)(i) &&
+        !io.issue(j).branch) {cd_link(i) := io.target(j)}
+    }
+  }
+  val cnt = RegInit(0.U(32.W))
+  cnt := cnt + 1.U
+  printf(p"=======================cnt = $cnt=============================\n")
 }

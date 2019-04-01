@@ -27,6 +27,7 @@ class F1Issue(addr_width: Int, id_width: Int)
   extends WbIssue(addr_width, id_width) {
   val f1 = Bool()
   val mem_en = Bool()
+  val branch = Bool()
 }
 
 class InfoIssue(addr_width: Int, id_width: Int, val data_width: Int)
@@ -47,9 +48,8 @@ trait InstParam extends BackParam {
 
 class InstQueue extends Module with InstParam {
   val io = IO(new Bundle{
-    val ready = Output(Bool())
-    val in  = Input(Valid(new F1Issue(wPhyAddr, wOrder))) //TODO: check if kill or not
-    val issue = Decoupled(new InfoIssue(wPhyAddr, wOrder, data_width))
+    val in  = Flipped(DecoupledIO(new F1Issue(wPhyAddr, wOrder))) //TODO: check if kill or not
+    val issue = DecoupledIO(new InfoIssue(wPhyAddr, wOrder, data_width))
     val data_sel = Output(Vec(2, UInt(nCommit.W)))
 
     val resp_in = Input(new Info(data_width))
@@ -72,17 +72,20 @@ class InstQueue extends Module with InstParam {
   })
   val inst_ctrl = Wire(new Bundle {
     // for head
-    val invalid = Bool()
-    val ready = Vec(2, Bool())
+    val invalid = Bool() /*whether to invalidate the reg issue or not*/
+    val ready = Vec(2, Bool()) /*whether the 2 op-data ready or not*/
     // for queue
-    val snoop = Vec(nEntry, Vec(2, Bool()))
-    val limit = Vec(nEntry, Bool())
-    val valid = UInt(nEntry.W)
-    val kill  = new PriorityKill(nEntry)
-    val tail  = UInt((wEntry+1).W)
-    def pop_out: Bool = (valid & forward).orR
+    val pop_out = Bool()
+    val count = UInt(wCount.W)
+    val snoop = Vec(nEntry, Vec(2, Bool())) /*snoop bypass info*/
+    val limit = Vec(nEntry, Bool()) /*memory inst issue limitation*/
+    val valid = UInt(nEntry.W) /*inst queue valid vector based on kill info*/
+    val kill  = new PriorityKill(nEntry) /*kill action*/
+    def tail: UInt = count - 1.U /*the tail of queue*/
+    /*issue forward enable vector*/
     def forward: UInt = VecInit((0 until nEntry).map(i => snoop(i).reduce(_&&_) && !limit(i))).asUInt
-    def fwd_ptr: UInt = Mux(pop_out, PriorityEncoder(forward), 0.U(wEntry.W))
+    /*issue forward ptr of queue*/
+    def fwd_ptr: UInt = Mux((valid & forward).orR, PriorityEncoder(forward), 0.U)
   })
 
   val inst_count = RegInit(0.U(wCount.W))
@@ -90,7 +93,7 @@ class InstQueue extends Module with InstParam {
   val inst_queue = Reg(Vec(nEntry, new F1Issue(wPhyAddr, wOrder)))
 
   io.counter := inst_count
-  io.ready := ~inst_valid.asUInt.orR //|| io.issue.ready FIXME: save time and logic???
+  io.in.ready := ~inst_valid.asUInt.orR //|| io.issue.ready FIXME: save time and logic???
 
   io.data_sel := issue.bits.rs.map(rs => VecInit(io.bypass.map(bypass =>
     bypass.addr === rs.addr && bypass.valid)).asUInt)
@@ -99,12 +102,13 @@ class InstQueue extends Module with InstParam {
   inst_ctrl.ready := (0 until 2).map(i => io.data_sel(i).orR || issue.bits.rs(i).valid)
 
   io.pop_out.addr  := issue.bits.rd.addr
-  io.pop_out.valid := issue.bits.rd.valid && issue.bits.f1 && inst_ctrl.ready.reduce(_&&_) //&& io.issue.ready->no needed
+  io.pop_out.valid := issue.bits.rd.valid && issue.bits.f1 && inst_ctrl.ready.reduce(_&&_) //&& io.issue.ready no needed
   io.issue.valid            := issue.valid
   io.issue.bits.id          := issue.bits.id
   io.issue.bits.rd          := issue.bits.rd
   io.issue.bits.f1          := issue.bits.f1
   io.issue.bits.mem_en      := issue.bits.mem_en
+  io.issue.bits.branch      := issue.bits.branch
   io.issue.bits.info.op     := io.resp_in.op
   io.issue.bits.info.pc     := io.resp_in.pc
   io.issue.bits.info.imm    := io.resp_in.imm
@@ -114,21 +118,20 @@ class InstQueue extends Module with InstParam {
     io.issue.bits.rs(i).valid := inst_ctrl.ready(i)
   }
 
-  inst_ctrl.tail := inst_count - 1.U
+  inst_ctrl.count := Mux(inst_ctrl.kill.use_ptr(inst_valid.asUInt), inst_ctrl.kill.ptr, inst_count)
   inst_ctrl.valid := inst_valid.asUInt & inst_ctrl.kill.survive
   inst_ctrl.kill.cmp := inst_queue.map(i => CmpId(io.kill.bits, i.id, io.head_id))
-  inst_ctrl.kill.cmp_val := io.kill.valid
+  inst_ctrl.kill.valid := io.kill.valid
+  inst_ctrl.pop_out := (io.issue.ready || inst_ctrl.invalid) && inst_ctrl.count =/= 0.U
   when (io.xcpt) { issue.valid := false.B
   }.elsewhen(issue.valid) {
-    when (inst_count === 0.U) {
-      when (inst_ctrl.invalid) {
-        issue.valid := false.B
-      }.elsewhen(io.issue.ready) {
-        issue  := io.in
-      }
-    }.elsewhen(inst_ctrl.invalid || io.issue.ready) {
-      issue.bits  := inst_queue(inst_ctrl.fwd_ptr)
-      issue.valid := inst_ctrl.kill.survive(0)
+    when (inst_ctrl.pop_out) {
+      issue.valid := true.B
+      issue.bits := inst_queue(inst_ctrl.fwd_ptr)
+    }.elsewhen(inst_ctrl.invalid) {
+      issue.valid := false.B
+    }.elsewhen(io.issue.ready) {
+      issue := io.in
     }.otherwise {for (i <- 0 until 2)
       issue.bits.rs(i).valid := inst_ctrl.valid(i)
     }
@@ -138,17 +141,18 @@ class InstQueue extends Module with InstParam {
 
   when (io.xcpt) { inst_count := 0.U
   }.elsewhen (issue.valid) {
-    when (io.kill.valid && inst_ctrl.kill.cmp(0)) {
-      inst_count := 0.U
-    }.elsewhen (inst_count =/= 0.U) {
-      when (inst_ctrl.kill.valid(inst_valid.asUInt)) {
-        inst_count := inst_ctrl.kill.ptr - io.issue.ready.asUInt
-      }.elsewhen(io.issue.ready && !io.in.valid) {
-        inst_count := inst_ctrl.tail
+    when (io.in.valid) {
+      when (inst_ctrl.pop_out) {
+        inst_count := inst_ctrl.count
+      }.otherwise {
+        inst_count := inst_ctrl.count+1.U
       }
-    }
-    when(!io.issue.ready && io.in.valid) {
-      inst_count := inst_count + 1.U
+    }.otherwise {
+      when (inst_ctrl.pop_out) {
+        inst_count := inst_ctrl.tail
+      }.otherwise {
+        inst_count := inst_ctrl.count
+      }
     }
   }
 
@@ -159,17 +163,18 @@ class InstQueue extends Module with InstParam {
   def touch_count : Seq[Bool] = (0 until nEntry).map(i => i.U === inst_count(wEntry-1,0))
 
   for (i <- 0 until nEntry) {
-    when (io.xcpt) {
-      inst_valid(i) := false.B
-    }.elsewhen (issue.valid) {
-      when (io.issue.ready) {
-        when (stable_queue(i)) {
+    when (issue.valid) {
+      when (io.xcpt) {
+        inst_valid(i) := false.B
+      }.elsewhen (inst_ctrl.pop_out) {
+        when (touch_tail(i)) {
+          inst_valid(i) := io.in.valid
+        }.elsewhen(stable_queue(i)) {
           inst_valid(i) := inst_ctrl.valid(i)
         }.elsewhen(shift_queue(i)) { if (i < nEntry-1)
           inst_valid(i) := inst_ctrl.valid(i + 1)
-        }
-        when (touch_tail(i)) {
-          inst_valid(i) := io.in.valid && inst_count =/= 0.U
+        }.otherwise {
+          inst_valid(i) := false.B
         }
       }.otherwise {
         when(touch_count(i)) {
@@ -181,8 +186,11 @@ class InstQueue extends Module with InstParam {
     }
 
     when (issue.valid) {
-      when (io.issue.ready) {
-        when(stable_queue(i)){ updateQueue(i)
+      when (inst_ctrl.pop_out) {
+        when (touch_tail(i) && io.in.valid) { //TODO: when inst_count =/= inst_ctrl.count then io,in.valid is false
+          inst_queue(i) := io.in.bits
+        }.elsewhen(stable_queue(i)){
+          updateQueue(i)
         }.elsewhen(shift_queue(i)) { if (i < nEntry-1) {
           for (j <- 0 until 2) {
             inst_queue(i).rs(j).addr := inst_queue(i + 1).rs(j).addr
@@ -191,15 +199,13 @@ class InstQueue extends Module with InstParam {
           inst_queue(i).id := inst_queue(i + 1).id
           inst_queue(i).rd := inst_queue(i + 1).rd
           inst_queue(i).f1 := inst_queue(i + 1).f1
-          inst_queue(i).mem_en := inst_queue(i + 1).mem_en }
-        }
-        when (touch_tail(i) && io.in.valid && inst_count =/= 0.U) {
-          inst_queue(i) := io.in.bits
-        }
+          inst_queue(i).mem_en := inst_queue(i + 1).mem_en
+        }}
       }.otherwise {
         when(touch_count(i) && io.in.valid) {
           inst_queue(i) := io.in.bits
-        }.otherwise { updateQueue(i)
+        }.otherwise {
+          updateQueue(i)
         }
       }
     }
