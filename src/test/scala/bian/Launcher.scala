@@ -8,7 +8,7 @@ object Launcher {
   val args = Array("--display-base", "16")
   implicit val conf = CPUConfig()
   val tests = Map(
-    "State" -> {manager: TesterOptionsManager =>
+    "StateCtrl" -> {manager: TesterOptionsManager =>
       Driver.execute(() => new StateCtrl, manager) {
         c => new StateTest(c)
       }
@@ -34,7 +34,7 @@ object Launcher {
       }
     },
     "IssueQueue" -> {manager: TesterOptionsManager =>
-      Driver.execute(() => new IssueQueue, manager) {
+      Driver.execute(() => new IssueQueue(4), manager) {
         c => new IssueQTest(c)
       }
     },

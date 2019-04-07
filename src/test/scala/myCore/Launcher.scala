@@ -17,26 +17,6 @@ object Launcher {
       Driver.execute(() => new OneHotEncoder(4), manager) {
         c => new EncoderTest(c)
       }
-    },
-    "RAS" -> {manager: TesterOptionsManager =>
-      Driver.execute(() => new RAS(8), manager) {
-        c => new RASTest(c)
-      }
-    },
-    "LRU" -> {manager: TesterOptionsManager =>
-      Driver.execute(() => new LRU(4), manager) {
-        c => new LRUTest(c)
-      }
-    },
-    "State" -> {manager: TesterOptionsManager =>
-      Driver.execute(() => new StateCtrl(conf.xprlen), manager) {
-        c => new StateTest(c)
-      }
-    },
-    "Ccore" -> {manager: TesterOptionsManager =>
-      Driver.execute(() => new CaheCore(4,6,20), manager) {
-        c => new CCoreText(c)
-      }
     }
   )
 
