@@ -16,17 +16,11 @@ trait BTBParams {
 }
 
 object BTBType {
-  val invalid = 0
-  val retn    = 1
-  val branch  = 2
-  val jump    = 3
+  val branch  = 0
+  val jump    = 1
+//  val retn    = 3
   val NUM = jump + 1
   val SZ = log2Ceil(NUM)
-}
-
-class Predict(val data_width: Int) extends Bundle with BTBParams {
-  val redirect = Bool() // = 0 cont || = 1 jump
-  val tgt = UInt(data_width.W)
 }
 
 class BTB(implicit conf: CPUConfig) extends Module with BTBParams { //todo: you or meiyou, that's a question
@@ -36,10 +30,9 @@ class BTB(implicit conf: CPUConfig) extends Module with BTBParams { //todo: you 
     val fb_type = Input(UInt(BTBType.SZ.W))
 
     val predict  = Output(Vec(conf.nInst, new Predict(conf.data_width)))
-    val feedBack = Input(Valid(new Predict(conf.data_width)))
     val split    = Output(Bool())
+    val feedBack = Input(Valid(new Predict(conf.data_width)))
 
-    val raspeek  = Input(UInt(conf.data_width.W)) // used for return type
     val cyc = Input(UInt(conf.data_width.W))
   })
 
@@ -68,8 +61,8 @@ class BTB(implicit conf: CPUConfig) extends Module with BTBParams { //todo: you 
   })
   val predict = Wire(new Bundle {
     val high_val = UInt(nHigh.W)
-    val high_idx = UInt(nLow.W)
-    val high_eq  = UInt(log2Ceil(nLow).W)
+    def high_idx: UInt = OHToUInt(high_val)
+    val high_equ = UInt(log2Ceil(nLow).W)
     val pc_high  = UInt((conf.data_width-OFF_MSB-1).W)
     val tg_high  = UInt((conf.data_width-OFF_MSB-1).W)
 
@@ -80,30 +73,26 @@ class BTB(implicit conf: CPUConfig) extends Module with BTBParams { //todo: you 
     val bj_type  = Vec(conf.nInst, UInt(BTBType.SZ.W))
     val jump_tgt = Vec(conf.nInst, UInt(conf.data_width.W))
     val cont_tgt = Vec(conf.nInst, UInt(conf.data_width.W))
-    val tgt_cand = Vec(conf.nInst, Vec(BTBType.NUM, UInt(conf.data_width.W)))
+//    val tgt_cand = Vec(conf.nInst, Vec(BTBType.NUM, UInt(conf.data_width.W)))
   })
   predict.pc_high  := io.if_pc(conf.xprlen-1, OFF_MSB+1)
-  predict.high_val := VecInit(btb.pc_high.map(_ === predict.pc_high)).asUInt & btb.high_val.asUInt
-  predict.high_idx := OHToUInt(predict.high_val)
-  predict.high_eq  := VecInit(btb.high_idx.map(predict.high_idx === _)).asUInt //FIXME
   predict.tg_high  := Mux1H(predict.high_val, btb.tg_high)
+  predict.high_val := VecInit(btb.pc_high.map(_ === predict.pc_high)).asUInt & btb.high_val.asUInt
+  predict.high_equ := VecInit(btb.high_idx.map(predict.high_idx === _)).asUInt //FIXME
   for (i <- 0 until conf.nInst) {
     predict.pc_low(i)  := Cat(io.if_pc(OFF_MSB, OFF_LSB+1), i.U(1.W))
+
+    predict.low_val(i) := VecInit(btb.pc_low.map(_ === predict.pc_low(i))).asUInt &
+      predict.high_equ & btb.low_val.asUInt
+    predict.tg_low(i)  := Mux1H(predict.low_val(i), btb.tg_low)
     predict.jump_tgt(i):= Cat(predict.tg_high, predict.tg_low(i), 0.U(OFF_LSB.W))
 
-    predict.low_val(i) := VecInit(btb.pc_low.map(_ === predict.pc_low(i))).asUInt & predict.high_eq & btb.low_val.asUInt
-    predict.tg_low(i)  := Mux1H(predict.low_val(i), btb.tg_low)
     predict.bj_type(i) := Mux1H(predict.low_val(i), btb.bj_type)
     predict.h_count(i) := Mux1H(predict.low_val(i), btb.h_count)
 
-    predict.tgt_cand(i)(BTBType.invalid) := predict.cont_tgt(i)
-    predict.tgt_cand(i)(BTBType.retn)    := io.raspeek
-    predict.tgt_cand(i)(BTBType.jump)    := predict.jump_tgt(i)
-    predict.tgt_cand(i)(BTBType.branch)  := predict.jump_tgt(i)
-
-    io.predict(i).redirect := predict.low_val(i).orR && (predict.bj_type(i) =/= BTBType.branch.U || predict.h_count(i)(1).toBool)
-    io.predict(i).tgt := predict.tgt_cand(i)(Mux(io.predict(i).redirect, predict.bj_type(i), BTBType.invalid.U))
-
+    io.predict(i).redirect := predict.low_val(i).orR &&
+      (predict.bj_type(i) =/= BTBType.branch.U || predict.h_count(i)(1).toBool)
+    io.predict(i).tgt := Mux(io.predict(i).redirect, predict.jump_tgt(i), predict.cont_tgt(i))
   }
   predict.cont_tgt(0) := Cat(io.if_pc(conf.data_width-1, conf.pcLSB+1), 1.U(1.W), 0.U(conf.pcLSB.W))
   predict.cont_tgt(1) := predict.cont_tgt(0) + 4.U
@@ -112,9 +101,7 @@ class BTB(implicit conf: CPUConfig) extends Module with BTBParams { //todo: you 
   val feedback_wire = Wire(new Bundle {
     val high_val = UInt(nHigh.W)
     val pc_high  = UInt((conf.data_width-OFF_MSB-1).W)
-    def OLD = 0
-    def NEW = 1
-    val tg_high  = Vec(2, UInt((conf.data_width-OFF_MSB-1).W))
+    val tgt_high_neq = Bool()
 
     val high_exist   = Bool()
     val high_insert  = Bool()
@@ -162,26 +149,25 @@ class BTB(implicit conf: CPUConfig) extends Module with BTBParams { //todo: you 
   feedback_wire.pc_high  := io.fb_pc(conf.data_width-1, OFF_MSB+1)
   feedback_wire.high_val := VecInit(btb.pc_high.map(_ === feedback_wire.pc_high)).asUInt & btb.high_val.asUInt
   feedback_wire.high_idx := OHToUInt(feedback_wire.high_val)
-  feedback_wire.tg_high(feedback_wire.OLD) := Mux1H(feedback_wire.high_val, btb.tg_high)
-  feedback_wire.tg_high(feedback_wire.NEW) := io.feedBack.bits.tgt(conf.data_width-1, OFF_MSB+1)
+
   feedback_wire.pc_low := io.fb_pc(OFF_MSB, OFF_LSB)
   feedback_wire.tg_low := io.feedBack.bits.tgt(OFF_MSB, OFF_LSB)
 
   feedback_wire.high_exist   := feedback_wire.high_val.orR
   feedback_wire.high_insert  := btb.high_val.map(!_).reduce(_||_)
   feedback_wire.high_replace := !feedback_wire.high_insert && !feedback_wire.high_exist
-
+  feedback_wire.tgt_high_neq := Mux1H(feedback_wire.high_val, btb.tg_high) =/=
+    io.feedBack.bits.tgt(conf.data_width-1, OFF_MSB+1)
   feedback_wire.low_inval := (0 until nLow).map(i =>
     (feedback_wire.high_replace && btb.high_idx(i) === lru.oldest) ||
-      (feedback_wire.high_exist && btb.high_idx(i) === feedback_wire.high_idx &&
-        feedback_wire.tg_high(feedback_wire.OLD) =/= feedback_wire.tg_high(feedback_wire.NEW)))
+    (feedback_wire.tgt_high_neq && btb.high_idx(i) === feedback_wire.high_idx && feedback_wire.high_exist))
 
   feedback_wire.high_eq := VecInit(btb.high_idx.map(feedback_wire.high_idx === _)).asUInt
   feedback_wire.low_val := VecInit(btb.pc_low.map(_ === feedback_wire.pc_low)).asUInt & feedback_wire.high_eq & btb.low_val.asUInt
   feedback_wire.exist   := feedback_reg.low_val.orR
   feedback_wire.low_idx := Mux(feedback_wire.exist, OHToUInt(feedback_reg.low_val),
-                            Mux(btb.high_val.map(!_).reduce(_||_),
-                              PriorityEncoder(btb.high_val.map(!_)), lfsr6))
+                           Mux(btb.high_val.map(!_).reduce(_||_), PriorityEncoder(btb.high_val.map(!_)), lfsr6))
+
   feedback_wire.h_count  := Mux1H(feedback_reg.low_val, btb.h_count)
   feedback_wire.bj_type  := Mux1H(feedback_reg.low_val, btb.bj_type)
 
@@ -201,15 +187,23 @@ class BTB(implicit conf: CPUConfig) extends Module with BTBParams { //todo: you 
   }
 
   when (feedback_reg.redirect) {
+    // high part
     btb.high_val(feedback_reg.high_idx) := true.B
     btb.tg_high(feedback_reg.high_idx)  := feedback_reg.tgt(conf.data_width-1, OFF_MSB+1)
     btb.pc_high(feedback_reg.high_idx)  := feedback_reg.pc(conf.data_width-1, OFF_MSB+1)
-    btb.low_val(feedback_wire.low_idx)  := true.B
+    // low part
     btb.tg_low(feedback_wire.low_idx)   := feedback_reg.tgt(OFF_MSB, OFF_LSB)
     btb.pc_low(feedback_wire.low_idx)   := feedback_reg.pc(OFF_MSB, OFF_LSB)
     btb.high_idx(feedback_wire.low_idx) := feedback_reg.high_idx
     btb.bj_type(feedback_wire.low_idx)  := feedback_reg.btb_type
   }
+
+  when (feedback_reg.redirect) {
+    btb.low_val(feedback_wire.low_idx)  := true.B
+  }.elsewhen(feedback_reg.valid && feedback_wire.exist && feedback_reg.btb_type =/= BTBType.branch.U) {
+    btb.low_val(feedback_wire.low_val) := false.B
+  }
+
   when (feedback_reg.valid && feedback_wire.exist) {
     when (feedback_reg.redirect) { when (feedback_wire.h_count =/= 3.U) {
       btb.h_count(feedback_wire.low_idx) := feedback_wire.h_count + 1.U }
@@ -219,8 +213,8 @@ class BTB(implicit conf: CPUConfig) extends Module with BTBParams { //todo: you 
   }.elsewhen(feedback_reg.redirect) {
     btb.h_count(feedback_wire.low_idx) := 2.U
   }
-  when ((feedback_reg.valid && feedback_wire.exist && feedback_wire.bj_type === BTBType.invalid.U) ||
-    (feedback_wire.bj_type =/= BTBType.invalid.U && feedback_reg.redirect)) {
-    printf("===============btb fault!!!================\n")
-  }
+//  when ((feedback_reg.valid && feedback_wire.exist && feedback_wire.bj_type === BTBType.invalid.U) ||
+//    (feedback_wire.bj_type =/= BTBType.invalid.U && feedback_reg.redirect)) {
+//    printf("===============btb fault!!!================\n")
+//  }
 }

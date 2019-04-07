@@ -23,15 +23,14 @@ trait ScalarOpConstants {
   val PC_EXC   = 3.U(2.W)  // exception
 
   // Branch Type
-  val BR_N     = 0.U(4.W)  // Next
-  val BR_NE    = 1.U(4.W)  // Branch on NotEqual
-  val BR_EQ    = 2.U(4.W)  // Branch on Equal
-  val BR_GE    = 3.U(4.W)  // Branch on Greater/Equal
-  val BR_GEU   = 4.U(4.W)  // Branch on Greater/Equal Unsigned
-  val BR_LT    = 5.U(4.W)  // Branch on Less Than
-  val BR_LTU   = 6.U(4.W)  // Branch on Less Than Unsigned
-  val BR_J     = 7.U(4.W)  // Jump
-  val BR_JR    = 8.U(4.W)  // Jump Register
+  val BR_N     = 0.U(3.W)  // Next
+  val BR_NE    = 1.U(3.W)  // Branch on NotEqual
+  val BR_EQ    = 2.U(3.W)  // Branch on Equal
+  val BR_GE    = 3.U(3.W)  // Branch on Greater/Equal
+  val BR_GEU   = 4.U(3.W)  // Branch on Greater/Equal Unsigned
+  val BR_LT    = 5.U(3.W)  // Branch on Less Than
+  val BR_LTU   = 6.U(3.W)  // Branch on Less Than Unsigned
+
 
   // RS1 Operand Select Signal
   val OP1_X     = 0.U(2.W)
@@ -48,9 +47,7 @@ trait ScalarOpConstants {
   val OP2_RS2    = 1.U(3.W) // Register Source #2
   val OP2_ITYPE  = 2.U(3.W) // immediate, I-type
   val OP2_UTYPE  = 3.U(3.W) // immediate, U-type
-  val OP2_SBTYPE = 4.U(3.W) // immediate, B
-  val OP2_UJTYPE = 5.U(3.W) // immediate, J-type
-  val OP2_STYPE  = 6.U(3.W) // immediate, S-type
+  val OP2_STYPE  = 5.U(3.W) // immediate, S-type
 
   // Register Operand Output Enable Signal
   val OEN_0   = false.B

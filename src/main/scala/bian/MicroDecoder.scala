@@ -12,11 +12,15 @@ object Jump {
 class MicroDecoder(inst_width: Int) extends Module{
   val io = IO(new Bundle{
     val inst = Input(UInt(inst_width.W))
-    val jump = Output(UInt(Jump.NUM.W))
+//    val jump = Output(UInt(Jump.NUM.W))
     val isjal = Output(Bool())
     val isjalr = Output(Bool())
     val isbrnch = Output(Bool())
+
     val is_bj = Output(Bool())
+    val brchjr = Output(Bool())
+    val brchj  = Output(Bool())
+    val privil = Output(Bool())
   })
 
   val func  = io.inst(6,2)
@@ -29,12 +33,16 @@ class MicroDecoder(inst_width: Int) extends Module{
   val store = func === "b01000".U
   val ariti = func === "b00100".U
   val arith = func === "b01100".U
+  val fence = func === "b00011".U
   val csrr  = func === "b11100".U
   io.isjal := jal
   io.isjalr := jalr
   io.isbrnch := brnch
-  io.is_bj := jal || jalr || brnch
-  def link(addr: UInt): Bool = addr === 1.U || addr === 5.U
+  io.is_bj  := jal || jalr || brnch
+  io.brchjr := jalr || brnch
+  io.brchj  := jal || brnch
+  io.privil := fence || csrr
+//  def link(addr: UInt): Bool = addr === 1.U || addr === 5.U
   /*
   * A JAL instruction should push the return address onto
   * a return-address stack (RAS) only when rd=x1/x5
@@ -48,22 +56,22 @@ class MicroDecoder(inst_width: Int) extends Module{
   *5  link  |   link   |        1       |   push
   */
 
-  val rs1_addr = io.inst(RS1_MSB, RS1_LSB)
-  val wbaddr   = io.inst(RD_MSB , RD_LSB)
-  val pop_push = jalr && link(wbaddr) && link(rs1_addr) && wbaddr =/= rs1_addr //#4
-
-  val jump = Wire(Vec(Jump.NUM, Bool()))
-  io.jump := jump.asUInt
-
-  jump(Jump.none) := (jal && !link(wbaddr)) ||
-    (jalr && !link(wbaddr) && !link(rs1_addr))// #1
-
-  jump(Jump.push) := (jal  &&  link(wbaddr))   ||
-    (jalr &&  link(wbaddr) && !link(rs1_addr)) || // #3
-    (jalr &&  link(wbaddr) &&  link(rs1_addr)  && wbaddr === rs1_addr) || // #5
-    pop_push // #4
-
-  jump(Jump.pop) := (jalr && !link(wbaddr) && link(rs1_addr))  || // #2
-    pop_push // #2
+//  val rs1_addr = io.inst(RS1_MSB, RS1_LSB)
+//  val wbaddr   = io.inst(RD_MSB , RD_LSB)
+//  val pop_push = jalr && link(wbaddr) && link(rs1_addr) && wbaddr =/= rs1_addr //#4
+//
+//  val jump = Wire(Vec(Jump.NUM, Bool()))
+//  io.jump := jump.asUInt
+//
+//  jump(Jump.none) := (jal && !link(wbaddr)) ||
+//    (jalr && !link(wbaddr) && !link(rs1_addr))// #1
+//
+//  jump(Jump.push) := (jal  &&  link(wbaddr))   ||
+//    (jalr &&  link(wbaddr) && !link(rs1_addr)) || // #3
+//    (jalr &&  link(wbaddr) &&  link(rs1_addr)  && wbaddr === rs1_addr) || // #5
+//    pop_push // #4
+//
+//  jump(Jump.pop) := (jalr && !link(wbaddr) && link(rs1_addr))  || // #2
+//    pop_push // #2
 
 }

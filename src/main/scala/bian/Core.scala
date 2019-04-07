@@ -10,17 +10,14 @@ class InterfaceIO(val data_width: Int) extends Bundle {
 
   val forward  = Input(Vec(2, Bool()))
 
-  val inst     = Output(Vec(2, Valid(UInt(data_width.W))))
-  val pc       = Output(Vec(2, UInt(data_width.W)))
+  val pc    = Output(Vec(2, UInt(data_width.W)))
+  val inst  = Output(Vec(2, Valid(UInt(data_width.W))))
+  val pred  = Output(new PredictInfo(data_width))
+  val pc_split = Output(Bool())
 
-  val split    = Output(Bool())
-  val pred     = Output(new PredictInfo(data_width))
-
-  val ras_pop  = Input(Bool())
-  val ras_push = Input(Valid(UInt(data_width.W)))
-  val fb_pc    = Input(UInt(data_width.W))
-  val fb_type  = Input(UInt(BTBType.SZ.W))
-  val feedBack = Input(Valid(new Predict(data_width)))
+  val fb_pc   = Input(UInt(data_width.W))
+  val fb_type = Input(UInt(BTBType.SZ.W))
+  val feedback = Input(Valid(new Predict(data_width)))
 }
 
 class Core(implicit conf: CPUConfig) extends Module with BTBParams {

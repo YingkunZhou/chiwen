@@ -53,6 +53,7 @@ class LsEntry(val id_width: Int, val addr_width: Int) extends Bundle {
 }
 
 class LsIssue(val id_width: Int, val data_width: Int) extends Bundle { // from ALU
+  val valid = Bool()
   val id = UInt(id_width.W)
   val addr = UInt(data_width.W)
   val data = UInt(data_width.W)
@@ -82,6 +83,7 @@ class StQCtrl(n: Int) extends T2QCtrl(n) {
 class LdqCtrl(n: Int) extends StQCtrl(n) {
   val head_next = new QueueBackward(n)
   val kill_head = Bool()
+  val capty_gt = Vec(2, Bool()) //for accelerate
 }
 
 class H2T2RingQueue(val nEntry: Int) extends Bundle {
@@ -132,7 +134,7 @@ class LoadStoreQueue(nEntry: Int, val id_width: Int, val data_width: Int, val wP
   def ls_valid: Bool =(valid & addr_ok.asUInt).orR
   def ls_ptr: UInt = PriorityEncoder(Mux(conti || ls_above.orR, ls_above, ls_below))
   def id: UInt = ls_id(ls_ptr)
-  def typ: UInt = ls_id(ls_ptr)
+  def typ: UInt = ls_typ(ls_ptr)
   def addr: UInt = ls_addr(ls_ptr)
   def byte_en(j: Int): UInt = VecInit((0 until nEntry).map(i => ls_typ(i) === MT_W ||
     (ls_typ(i) === MT_B && ls_addr(i)(1,0) === j.U) ||
@@ -146,7 +148,7 @@ class LoadQueue(val nLoad: Int, id_width: Int, val addr_width: Int, data_width: 
   def push(i: Int, id: UInt, rd: UInt, typ: UInt, stq_ptr: UInt): Unit = {
     addr_ok(tail(i)(w-1,0)) := false.B
     data_ok(tail(i)(w-1,0)) := false.B
-    ls_id(tail(i)(w-1,0)) := id
+    ls_id(tail(i)(w-1,0))  := id
     ls_typ(tail(i)(w-1,0)) := typ
     sl_ptr(tail(i)(w-1,0)) := stq_ptr
     wbaddr(tail(i)(w-1,0)) := rd
@@ -163,19 +165,21 @@ class LoadQueue(val nLoad: Int, id_width: Int, val addr_width: Int, data_width: 
 class StoreQueue(val nStore: Int, id_width: Int, data_width: Int, val nLoad: Int)
   extends LoadStoreQueue(nEntry = nStore, id_width, data_width, wPtr = log2Ceil(nLoad)+1) {
   val data = Vec(data_width/8, Vec(nStore, UInt(8.W)))
+  val arready = Vec(nStore, Bool())
   def push(i: Int, id: UInt, typ: UInt, ldq_ptr: UInt): Unit = {
     addr_ok(tail(i)(w-1,0)) := false.B
     data_ok(tail(i)(w-1,0)) := false.B
+    arready(tail(i)(w-1,0)) := false.B
     ls_id(tail(i)(w-1,0))   := id
     ls_typ(tail(i)(w-1,0))  := typ
     sl_ptr(tail(i)(w-1,0))  := ldq_ptr
   }
   def ldq_ptr: UInt = sl_ptr(head(w-1,0))
-  def addr_eq(addr: UInt): UInt = addr_ok.asUInt &
+  def addr_eq(addr: UInt): UInt = arready.asUInt &
     VecInit(ls_addr.map(_(data_width-1,2) === addr)).asUInt
   def head_id: UInt = ls_id(head(w-1,0))
   def head_typ: UInt = ls_typ(head(w-1,0))
-  def head_addr_ok: Bool = addr_ok(head(w-1,0))
+  def head_addr_ok: Bool = arready(head(w-1,0))
   def head_data_ok: Bool = data_ok(head(w-1,0)) && head_val
   def head_addr: UInt = ls_addr(head(w-1,0))
   def head_data: UInt = Cat(data(3)(head(w-1,0)),data(2)(head(w-1,0)),data(1)(head(w-1,0)),data(0)(head(w-1,0)))
@@ -184,9 +188,10 @@ class StoreQueue(val nStore: Int, id_width: Int, data_width: Int, val nLoad: Int
 class LoadStore extends Module with LsParam {
   val io = IO(new Bundle {
     val in  = Vec(nInst, Flipped(Decoupled(new LsEntry(wOrder, wPhyAddr))))
-    val mem_fcn = Input(Vec(2, Bool())) //TODO: load or store within raw valid
+    val mem_en = Input(Bool())
+    val mem_first = Input(Vec(2, Bool())) //TODO: load or store within raw valid
 
-    val issue = Input(Vec(3, Valid(new LsIssue(wOrder, data_width))))
+    val issue = Input(Vec(3, new LsIssue(wOrder, data_width)))
     val issueable = Output(Valid(UInt(wOrder.W))) //TODO: have to maintain the order
     val forward = Output(new ByPass(wPhyAddr)) //forward to inst queue
 
@@ -197,10 +202,11 @@ class LoadStore extends Module with LsParam {
 
     val xcpt = Input(Bool())
     val kill = Input(Valid(UInt(wOrder.W)))
-    val id_head = Input(UInt(wOrder.W))
+    val head = Input(UInt(wOrder.W))
     val rollback = Output(Valid(UInt(wOrder.W))) //the role same as except
   })
-
+  /*TODO List:
+  * 1. need to accelerate rollback time???*/
   def next(ptr: UInt, n: Int, inc: Int): UInt = {
     require(inc < 3)
     if (isPow2(n)) ptr + inc.U
@@ -209,7 +215,6 @@ class LoadStore extends Module with LsParam {
       else Mux(ptr(2).toBool, Cat(!ptr(3), 0.U(1.W), ptr(1,0)), ptr+2.U)
     }
   }
-
   /*=================data structure===================*/
   val queue = RegInit({
     val w = Wire(new LSQueue(nEntry = nEntry,
@@ -222,7 +227,7 @@ class LoadStore extends Module with LsParam {
   val queue_ctrl = Wire(new LSQCtrl(nEntry))
   queue_ctrl.nxt_head := queue.head.map(_+2.U)
   queue_ctrl.nxt_tail := queue.tail.map(_+2.U)
-  queue_ctrl.kill.const := VecInit(queue.entry.map(q => CmpId(io.kill.bits, q.id, io.id_head))).asUInt
+  queue_ctrl.kill.const := VecInit(queue.entry.map(q => CmpId(io.kill.bits, q.id, io.head))).asUInt
   queue_ctrl.kill_ptr := queue_ctrl.kill.ptr(
     continue = queue.conti, head = queue.head(0)(wEntry),
     above = queue.above, below = queue.below)
@@ -261,8 +266,10 @@ class LoadStore extends Module with LsParam {
     w
   })
   val load_ctrl = Wire(new LdqCtrl(nLoad))
+  load_ctrl.capty_gt(0) := load_queue.tail_val0 || load_ctrl.inc_head
+  load_ctrl.capty_gt(1) := load_queue.tail_val1 || (load_queue.tail_val0 && load_ctrl.inc_head)
   load_ctrl.nxt_tail := load_queue.tail.map(next(_, nLoad, 2))
-  load_ctrl.kill.const := VecInit(load_queue.ls_id.map(CmpId(io.kill.bits, _, io.id_head))).asUInt
+  load_ctrl.kill.const := VecInit(load_queue.ls_id.map(CmpId(io.kill.bits, _, io.head))).asUInt
   load_ctrl.kill_ptr := load_ctrl.kill.ptr(
     continue = load_queue.conti, head = load_queue.head(wLoad),
     above = load_queue.above, below = load_queue.below)
@@ -300,13 +307,14 @@ class LoadStore extends Module with LsParam {
     w.ls_id   := DontCare //same as load queue
     w.ls_typ  := DontCare //same as load queue
     w.sl_ptr  := DontCare //same as load queue
+    w.arready := DontCare //same as addr_ok but don't invalidate when memory accessing
     w.data    := DontCare //write back to memory data
     w
   })
   val store_ctrl = Wire(new StQCtrl(nStore))
   store_ctrl.nxt_head := next(store_queue.head, nStore, 1)
   store_ctrl.nxt_tail := store_queue.tail.map(next(_, nStore, 2))
-  store_ctrl.kill.const := VecInit(store_queue.ls_id.map(CmpId(io.kill.bits, _, io.id_head))).asUInt
+  store_ctrl.kill.const := VecInit(store_queue.ls_id.map(CmpId(io.kill.bits, _, io.head))).asUInt
   store_ctrl.kill_ptr := store_ctrl.kill.ptr(
     continue = store_queue.conti, head = store_queue.head(wStore),
     above = store_queue.above, below = store_queue.below)
@@ -333,45 +341,47 @@ class LoadStore extends Module with LsParam {
     val mem_id  = Vec(nInst, UInt(wOrder.W)) /*memory inst id*/
     val mem_typ = Vec(nInst, UInt(MT_X.getWidth.W)) /*memory inst type*/
     val wbaddr  = Vec(nInst, UInt(wPhyAddr.W)) /*write back regfile address*/
-    val mem_fcn = Vec(2, Bool()) /*just for the first one and with in valid*/
+    val first_fcn = Vec(2, Bool()) /*just for the first one and with in valid*/
   })
   when (load_ctrl.inc_tail(0)) {
-    load_queue.push(i = 0, stq_ptr = store_queue.tail(0),
-      id  = Mux(dec.mem_valid(LD)(0), dec.mem_id(0), dec.mem_id(1)),
-      rd  = Mux(dec.mem_valid(LD)(0), dec.wbaddr(0), dec.wbaddr(1)),
-      typ = Mux(dec.mem_valid(LD)(0), dec.mem_typ(0),dec.mem_typ(1)))
+    load_queue.push(i = 0,
+      id  = Mux(dec.first_fcn(LD), dec.mem_id(0), dec.mem_id(1)),
+      rd  = Mux(dec.first_fcn(LD), dec.wbaddr(0), dec.wbaddr(1)),
+      typ = Mux(dec.first_fcn(LD), dec.mem_typ(0),dec.mem_typ(1)),
+      stq_ptr = Mux(dec.first_fcn(LD) || !store_ctrl.inc_tail(0), store_queue.tail(0), store_queue.tail(1))
+    )
     when (load_ctrl.inc_tail(1)) {
-      load_queue.push(i = 1, id = dec.mem_id(1), rd = dec.wbaddr(1), typ = dec.mem_typ(1),
-        stq_ptr = Mux(store_ctrl.inc_tail(0), store_queue.tail(1), store_queue.tail(0)))
+      load_queue.push(i = 1,id = dec.mem_id(1),rd = dec.wbaddr(1),typ = dec.mem_typ(1),
+        stq_ptr = store_queue.tail(0))
     }
   }
 
   when (store_ctrl.inc_tail(0)) {
-    store_queue.push(i = 0, ldq_ptr = load_queue.tail(0),
-      id  = Mux(dec.mem_valid(ST)(0), dec.mem_id(0), dec.mem_id(1)),
-      typ = Mux(dec.mem_valid(ST)(0), dec.mem_typ(0), dec.mem_typ(1)))
+    store_queue.push(i = 0,
+      id  = Mux(dec.first_fcn(ST), dec.mem_id(0), dec.mem_id(1)),
+      typ = Mux(dec.first_fcn(ST), dec.mem_typ(0), dec.mem_typ(1)),
+      ldq_ptr = Mux(dec.first_fcn(ST) || !load_ctrl.inc_tail(0), load_queue.tail(0), load_queue.tail(1)))
     when (store_ctrl.inc_tail(1)) {
-      store_queue.push(i = 1, id = dec.mem_id(1), typ = dec.mem_typ(1),
-        ldq_ptr = Mux(load_ctrl.inc_tail(0), load_queue.tail(1), load_queue.tail(0)))
+      store_queue.push(i = 1,id = dec.mem_id(1),typ = dec.mem_typ(1),ldq_ptr = load_queue.tail(0))
     }
   }
   /* load queue capacity greater than 0 as well as
    * first is load or the second is load and the first is not rejected by store queue */
-  load_ctrl.inc_tail(0)  := load_queue.tail_val0 &&
-    (dec.mem_valid(LD)(0) || (dec.mem_valid(LD)(1) && !(dec.mem_fcn(ST) && !store_queue.tail_val0)))
+  load_ctrl.inc_tail(0)  := load_ctrl.capty_gt(0) &&
+    (dec.mem_valid(LD)(0) || (dec.mem_valid(LD)(1) && !(dec.first_fcn(ST) && !store_queue.tail_val0)))
   /* store queue capacity greater than 0 as well as
    * first is store or the second is store and the first is not rejected by load queue */
   store_ctrl.inc_tail(0) := store_queue.tail_val0 &&
-    (dec.mem_valid(ST)(0) || (dec.mem_valid(ST)(1) && !(dec.mem_fcn(LD) && !load_queue.tail_val0)))
+    (dec.mem_valid(ST)(0) || (dec.mem_valid(ST)(1) && !(dec.first_fcn(LD) && !load_ctrl.capty_gt(0))))
   /* the load capacity is greater than 1 as well as
    * both are load inst */
-  load_ctrl.inc_tail(1)  := load_queue.tail_val1  && dec.mem_valid(LD).reduce(_&&_)
+  load_ctrl.inc_tail(1)  := load_ctrl.capty_gt(1) && dec.mem_valid(LD).reduce(_&&_)
   /* the store capacity is greater than 1 as well as
    * both are store inst */
   store_ctrl.inc_tail(1) := store_queue.tail_val1 && dec.mem_valid(ST).reduce(_&&_)
 
   for (i <- 0 until 2) {
-    dec.mem_fcn(i)  := Mux(queue.head_val0, dec.et_mem_fcn(i)(0), io.mem_fcn(i)) // make effect on the second one
+    dec.first_fcn(i)    := Mux(queue.head_val0, dec.et_mem_fcn(i)(0), io.mem_first(i)) // make effect on the second one
     dec.mem_valid(i)(0) := Mux(queue.head_val0, dec.et_mem_fcn(i)(0), dec.io_mem_fcn(i)(0))
     dec.mem_valid(i)(1) := Mux(queue.head_val0, dec.et_mem_fcn(i)(1) && queue.head_val1, dec.io_mem_fcn(i)(1))
   }
@@ -387,22 +397,21 @@ class LoadStore extends Module with LsParam {
   }
 
   queue_ctrl.push(0) := (queue.head_val0 && io.in(0).valid) ||
-    (!load_queue.tail_val0 && dec.io_mem_fcn(LD)(0)) ||
-    (!store_queue.tail_val0&& dec.io_mem_fcn(ST)(0))
+    (!load_ctrl.capty_gt(0) && dec.io_mem_fcn(LD)(0)) ||
+    (!store_queue.tail_val0 && dec.io_mem_fcn(ST)(0))
 
   queue_ctrl.push(1) := (queue.head_val0 && io.in(1).valid) ||
-    (Mux(io.mem_fcn(LD), !load_queue.tail_val1, !load_queue.tail_val0) && dec.io_mem_fcn(LD)(1)) ||
-    (Mux(io.mem_fcn(ST), !store_queue.tail_val1,!store_queue.tail_val0)&& dec.io_mem_fcn(ST)(1))
+    (Mux(io.mem_first(LD), !load_ctrl.capty_gt(1), !load_ctrl.capty_gt(0)) && dec.io_mem_fcn(LD)(1)) ||
+    (Mux(io.mem_first(ST), !store_queue.tail_val1,!store_queue.tail_val0)&& dec.io_mem_fcn(ST)(1))
 
   queue_ctrl.inc_tail(0) := queue.tail_val0 && queue_ctrl.push.reduce(_||_)
   queue_ctrl.inc_tail(1) := queue.tail_val1 && queue_ctrl.push(0) && io.in(1).valid
-
   queue_ctrl.inc_head(0) := queue.head_val0 && (
-    (dec.et_mem_fcn(LD)(0) && load_queue.tail_val0) ||
+    (dec.et_mem_fcn(LD)(0) && load_ctrl.capty_gt(0)) ||
     (dec.et_mem_fcn(ST)(0) && store_queue.tail_val0))
 
   queue_ctrl.inc_head(1) := queue.head_val1 && (
-    (dec.et_mem_fcn(LD)(1) && Mux(dec.et_mem_fcn(LD)(0), load_queue.tail_val1, load_queue.tail_val0)) ||
+    (dec.et_mem_fcn(LD)(1) && Mux(dec.et_mem_fcn(LD)(0), load_ctrl.capty_gt(1), load_ctrl.capty_gt(0))) ||
     (dec.et_mem_fcn(ST)(1) && Mux(dec.et_mem_fcn(ST)(0), store_queue.tail_val1,store_queue.tail_val0)))
 
   dec.io_mem_fcn(LD) := io.in.map(i => i.valid && i.bits.fcn === M_XRD)
@@ -418,21 +427,24 @@ class LoadStore extends Module with LsParam {
     val stq_1H = Vec(3, UInt(nStore.W)) /*store queue one hot vector*/
   })
   for (i <- 0 until 3) {
-    exe.ldq_1H(i) := VecInit(load_queue.ls_id.map(_ === io.issue(i).bits.id)).asUInt & load_queue.valid
-    exe.stq_1H(i) := VecInit(store_queue.ls_id.map(_ === io.issue(i).bits.id)).asUInt& store_queue.valid
+    exe.ldq_1H(i) := VecInit(load_queue.ls_id.map(_ === io.issue(i).id)).asUInt & load_queue.valid
+    exe.stq_1H(i) := VecInit(store_queue.ls_id.map(_ === io.issue(i).id)).asUInt& store_queue.valid
     when (io.issue(i).valid) {
       for (j <- 0 until nLoad) when (exe.ldq_1H(i)(j)) {
-        load_queue.ls_addr(j) := io.issue(i).bits.addr
+        load_queue.ls_addr(j) := io.issue(i).addr
         load_queue.addr_ok(j) := true.B
       }
       for (j <- 0 until nStore) when (exe.stq_1H(i)(j)) {
         store_queue.addr_ok(j) := true.B
-        store_queue.data(3)(j) := io.issue(i).bits.data(31,24)
-        store_queue.data(2)(j) := io.issue(i).bits.data(23,16)
-        store_queue.data(1)(j) := io.issue(i).bits.data(15, 8)
-        store_queue.data(0)(j) := io.issue(i).bits.data( 7, 0)
-        store_queue.ls_addr(j) := io.issue(i).bits.addr
-        store_queue.data_ok(j) := io.issue(i).bits.data_ok
+        store_queue.arready(j) := true.B
+        store_queue.ls_addr(j) := io.issue(i).addr
+        when (io.issue(i).data_ok) {
+          store_queue.data(3)(j) := io.issue(i).data(31,24)
+          store_queue.data(2)(j) := io.issue(i).data(23,16)
+          store_queue.data(1)(j) := io.issue(i).data(15, 8)
+          store_queue.data(0)(j) := io.issue(i).data( 7, 0)
+          store_queue.data_ok(j) := true.B
+        }
       }
     }
   }
@@ -488,22 +500,23 @@ class LoadStore extends Module with LsParam {
   })
 
   mem.fwd_fcn := Mux(!load_queue.ls_valid || (store_queue.ls_valid
-    && CmpId(store_queue.id, load_queue.id, io.id_head)), M_XWR, M_XRD)
+    && CmpId(store_queue.id, load_queue.id, io.head)), M_XWR, M_XRD)
   mem.fwd_addr  := Mux(mem.fwd_stall, mem_reg.ld_addr(data_width-1,2), load_queue.addr(data_width-1,2))
   mem.fwd_ptr   := Mux(mem.fwd_stall, mem_reg.stq_ptr, load_queue.stq_ptr)
   mem.fwd_conti := mem.fwd_ptr(wStore) === store_queue.head(wStore)
   mem.fwd_valid := Mux(mem.fwd_conti, store_queue.above & mem.fwd_below, store_queue.above | mem.fwd_below)
+
   for (j <- 0 until data_width/8) {
     mem.forward(j).const := store_queue.addr_eq(mem.fwd_addr) & store_queue.byte_en(j)
-    // if fwd_stall, continue to update these nodes
-    when (!mem.out_stall && !mem.store) {
+  }
+  // if fwd_stall, continue to update these nodes
+  when (!mem.out_stall && !mem.store) {
+    mem_reg.unsafe := (0 until nStore).map(i => mem.fwd_valid(i) && !store_queue.arready(i))
+    for (j <- 0 until data_width/8) {
       mem_reg.fwd_mux1H(j) := mem.forward(j).ptr1H(continue = mem.fwd_conti,
         above = store_queue.above, below = mem.fwd_below)
       mem_reg.fwd_valid(j) := mem.forward(j).valid(mem.fwd_valid)
     }
-  }
-  when (!mem.out_stall && !mem.store) {
-    mem_reg.unsafe := (0 until nStore).map(i => mem.fwd_valid(i) && !store_queue.addr_ok(i))
   }
   when (!mem.tot_stall) {
     when (mem.store) {
@@ -544,17 +557,10 @@ class LoadStore extends Module with LsParam {
       (store_queue.head_typ === MT_B && store_queue.head_addr(1,0) === j.U) ||
       (store_queue.head_typ === MT_H && store_queue.head_addr(1,0) === (j/2).U))).reduce(_|_)
 
-  for (i <- 0 until nLoad) {
-    when (mem_reg.valid(LD) && i.U === mem_reg.ld_ptr) {
-      load_queue.unsafe(i) := mem_reg.unsafe
-    }.elsewhen (mem.bwd_valid(i) && store_queue.head_addr_ok) {
-      load_queue.unsafe(i)(store_queue.head(wStore-1,0)) := false.B
-    }
-  }
-  mem.store := store_queue.head_data_ok && io.id_head === store_queue.head_id && !mem.tot_stall
+  mem.store := store_queue.head_data_ok && io.head === store_queue.head_id && !mem.tot_stall
 
   io.in(0).ready := queue.tail_val0
-  io.in(1).ready := queue.tail_val1 //TODO
+  io.in(1).ready := Mux(io.mem_en, queue.tail_val1, queue.tail_val0)
 
   io.issueable.valid := Mux(queue_ctrl.inc_head(0), queue.head_val1, queue.head_val0)
   io.issueable.bits  := Mux(queue_ctrl.inc_head(0), queue.read(1).id, queue.read(0).id)
@@ -566,9 +572,17 @@ class LoadStore extends Module with LsParam {
     Mux(mem_reg.byte_en(1), Mux1H(mem_reg.fwd_mux1H(1), store_queue.data(1)), io.mem.resp.bits.data(15, 8)),
     Mux(mem_reg.byte_en(0), Mux1H(mem_reg.fwd_mux1H(0), store_queue.data(0)), io.mem.resp.bits.data( 7, 0)))
   //what about load.fwd_valid.reduce(_&&_)???
-  io.ldcommit.valid    := io.mem.resp.valid && mem_reg.valid(LD) && !mem.fwd_stall
+  io.ldcommit.valid := io.mem.resp.valid && mem_reg.valid(LD) && !mem.fwd_stall
+
+  when (store_queue.head_addr_ok) { for (i <- 0 until nLoad)
+//    when (mem.bwd_valid(i)) { it doesn't matter
+      load_queue.unsafe(i)(store_queue.head(wStore-1,0)) := false.B
+  }
+  when (io.ldcommit.valid) {
+    load_queue.data_ok(mem_reg.ld_ptr) := true.B
+    load_queue.unsafe(mem_reg.ld_ptr) := mem_reg.unsafe
+  }
   io.ldcommit.wb.valid := io.ldcommit.valid
-  when (io.ldcommit.valid) {load_queue.data_ok(mem_reg.ld_ptr) := true.B}
   io.ldcommit.id       := mem_reg.ld_id
   io.ldcommit.wb.addr  := mem_reg.wb_addr
 
@@ -591,6 +605,28 @@ class LoadStore extends Module with LsParam {
 
   io.mem.req.bits.addr:= Mux(mem.store, store_queue.head_addr,
     Mux(mem.fwd_stall, mem_reg.ld_addr, Mux(mem.fwd_fcn === M_XWR, store_queue.addr, load_queue.addr)))
+
+  printf(p"output: ready->Vec(${io.in(0).ready}, ${io.in(1).ready}) isseable->${io.issueable.valid}:" +
+    p"${io.issueable.bits} forward->${io.forward.valid}:${io.forward.addr}\n" +
+    p"output: ldcommit->${io.ldcommit.valid} wb_val->${io.ldcommit.valid} id->${io.ldcommit.id} " +
+    p"wb_addr->${io.ldcommit.wb.addr} wb_data->${io.wb_data}\n" +
+    p"output: rollback->${io.rollback.valid}:${io.rollback.bits} stcommit->${io.stcommit.valid}:" +
+    p"${io.stcommit.bits}\n" +
+    p"output: id-> ${load_queue.id} req_val->${io.mem.req.valid} req_fcn->${io.mem.req.bits.fcn} req_addr->${io.mem.req.bits.addr} " +
+    p"req_typ->${io.mem.req.bits.typ} data->${io.mem.req.bits.data}\n")
+  printf(p"load queue: head->${load_queue.head} inc_head->${load_ctrl.inc_head} tail->${load_queue.tail} " +
+    p"inc_tail->${load_ctrl.inc_tail}\n")
+  printf(p"store queue: head->${store_queue.head} inc_head->${store_ctrl.inc_head} tail->${store_queue.tail} " +
+    p"inc_tail->${store_ctrl.inc_tail}\n")
+  printf(p"ldst queue: head->${queue.head} tail->${queue.tail}\n")
+  printf(p"mem ctrl: store->${mem.store} fwd_stall->${mem.fwd_stall} fwd_fcn->${mem.fwd_fcn} " +
+    p"st_lsptr->${store_queue.ls_valid}:${store_queue.ls_ptr} " +
+    p"ld_lsptr->${load_queue.ls_valid}:${load_queue.ls_ptr}\n" +
+    p"mem_reg: unsafe->${load_queue.unsafe(mem_reg.ld_ptr)} data_ok->${load_queue.data_ok(mem_reg.ld_ptr)} " +
+    p"store_addr_ok->${store_queue.head_addr_ok}\n")
+  printf(p"mem reg: fwd_mux1H->${mem_reg.fwd_mux1H} fwd_valid->${mem_reg.fwd_valid} valid->${mem_reg.valid}\n" +
+    p"ld_id->${mem_reg.ld_id} ld_typ->${mem_reg.ld_typ} ld_ptr->${mem_reg.ld_ptr} " +
+    p"wb_addr->${mem_reg.wb_addr} stq_ptr->${mem_reg.stq_ptr} unsafe->${mem_reg.unsafe}\n")
 
   val cnt = RegInit(0.U(32.W))
   cnt := cnt + 1.U
