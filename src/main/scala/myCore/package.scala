@@ -1,1 +1,0 @@
-package object myCore extends ScalarOpConstants with common.RISCVConstants with common.MemoryOpConstants
