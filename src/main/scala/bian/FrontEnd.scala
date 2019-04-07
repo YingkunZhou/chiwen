@@ -96,11 +96,12 @@ class FrontEnd(implicit conf: CPUConfig) extends Module with BTBParams {
 
     pred_reg.branch   := Mux(dec_isbj(0), microDec(0).isbrnch, microDec(1).isbrnch)
     pred_reg.is_jal   := Mux(dec_isbj(0), microDec(0).isjal, microDec(1).isjal)
+    pred_reg.tgt      := Mux(dec_isbj(0), fetchi.dec_btb(0).tgt, fetchi.dec_btb(1).tgt)
+    pred_reg.redirect := Mux(dec_isbj(0), fetchi.dec_btb(0).redirect, dec_isbj(1) && fetchi.dec_btb(1).redirect)
+
     pred_reg.imm      := Mux(dec_isbj(0), fetchi.inst(0).bits(31,7), fetchi.inst(1).bits(31,7))
     pred_reg.pc       := Mux(dec_isbj(0), fetchi.dec_pc(0), fetchi.dec_pc(1))
-    pred_reg.tgt      := Mux(dec_isbj(0), fetchi.dec_btb(0).tgt, fetchi.dec_btb(1).tgt)
     pred_reg.update   := Mux(dec_isbj(0), microDec(0).brchj, fetchi.inst(1).valid && microDec(1).brchj)
-    pred_reg.redirect := Mux(dec_isbj(0), fetchi.dec_btb(0).redirect, dec_isbj(1) && fetchi.dec_btb(1).redirect)
     rectify_reg(1)    := Mux(dec_isbj(0), calc_tgt(0), fetchi.inst(1).valid && calc_tgt(1))
 
     rectify_reg(0) := fetchi.inst(0).valid && calc_tgt(0)
