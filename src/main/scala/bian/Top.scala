@@ -1,4 +1,4 @@
-package fuxi
+package bian
 
 import chisel3._
 import common.{CPUConfig, SimDTM}

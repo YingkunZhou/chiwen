@@ -126,11 +126,14 @@ class IssueQueue(val nEntry: Int) extends Module with BackParam {
   io.issue.bits.id := issue.entry.id
   io.issue.bits.mem_en  := issue.entry.mem_en
   io.issue.bits.data_ok := issue.data_ok
+  issue_ctrl.entry := issue_table(issue.entry.tidx)
+
   io.issue.bits.info.rd := issue_ctrl.entry.rd
   io.issue.bits.info.f1 := issue_ctrl.entry.f1
+  io.issue.bits.info.imm := issue_ctrl.entry.imm
   io.issue.bits.info.branch := issue_ctrl.entry.branch
   for (i <- 0 until 2) {
-    io.issue.bits.info.data := Mux(issue_ctrl.table_sel(issue.entry.tidx)(i).orR,
+    io.issue.bits.info.data(i) := Mux(issue_ctrl.table_sel(issue.entry.tidx)(i).orR,
       issue_ctrl.tb_data(issue.entry.tidx)(i), issue_ctrl.entry.data(i))
   }
 

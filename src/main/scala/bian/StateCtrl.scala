@@ -20,7 +20,7 @@ trait BackParam {
   val ALU2 = 1
   val ALU3 = 2
   val LOAD = 3
-  val nIssue = Seq(2,2,4)
+  val nIssue = Array(2, 2, 4)
 }
 
 class Logic(val data_width: Int) extends Bundle {
@@ -59,7 +59,7 @@ class Commit(val id_width: Int, val addr_width: Int) extends Bundle { //TODO: re
   val wb    = new ByPass(addr_width)
 }
 
-class OpReqIO(id_width: Int) extends Bundle {
+class OpReqIO(val id_width: Int) extends Bundle {
   val id = Input(UInt(id_width.W))
   val op = Output(new OpCode)
 }
@@ -82,10 +82,10 @@ object CmpId { //if in1 <= in2 then true, else false FIXME tongyi
 class StateCtrl extends Module with BackParam {
   val io = IO(new Bundle {
     //linear
-    val logic = Input(Vec(nInst, new Logic(data_width)))
-    val first = Input(Bool()) // use some trick here
-    val physic = Output(Vec(nInst, new Physic(wPhyAddr, wOrder)))
-    val rsaddr = Output(Vec(nInst, Vec(2, UInt(wPhyAddr.W)))) //for speed time saving
+    val logic     = Input(Vec(nInst, new Logic(data_width)))
+    val first     = Input(Bool()) // use some trick here
+    val physic    = Output(Vec(nInst, new Physic(wPhyAddr, wOrder)))
+    val rsaddr    = Output(Vec(nInst, Vec(2, UInt(wPhyAddr.W)))) //for speed time saving
     val id_ready  = Output(Vec(nInst, Bool()))
     val phy_ready = Output(Vec(nInst, Bool()))
     val inc_order = Input(Vec(nInst, Bool()))
@@ -98,10 +98,10 @@ class StateCtrl extends Module with BackParam {
     val br_commit = Input(Valid(UInt(wOrder.W)))
     val st_commit = Input(Valid(UInt(wOrder.W)))
     val commit = Input(Vec(nCommit, new Commit(wOrder, wPhyAddr)))
-    val kill  = Input(new KillInfo(wOrder, nBrchjr)) // TODO: use latch because of one cycle mispredict
-    val split = Input(Bool())
-    val head  = Output(UInt(wOrder.W))
-    val empty = Output(Bool())
+    val kill   = Input(new KillInfo(wOrder, nBrchjr)) // TODO: use latch because of one cycle mispredict
+    val split  = Input(Bool())
+    val head   = Output(UInt(wOrder.W))
+    val empty  = Output(Bool())
     val xcpt_i = Input(new XcptInfoI(wOrder))
     val xcpt_o = Output(new XcptInfoO(wOrder, nBrchjr))
     //require

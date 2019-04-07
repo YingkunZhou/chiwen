@@ -21,7 +21,7 @@ object RingQNext {
 }
 
 object RingNfull {
-  def nFull(ptr: Vec[UInt], w: Int): Bool =
+  def apply(ptr: Vec[UInt], w: Int): Bool =
     ptr(0)(w-1,0) =/= ptr(1)(w-1,0) || ptr(0)(w) === ptr(1)(w)
 }
 
@@ -179,6 +179,7 @@ class FrontQueue(implicit val conf: CPUConfig) extends Module with FrontParam {
   io.pred.redirect := Mux(pred_ctrl.nEmpty, head_pred.redirect, io.in.pred.redirect)
   io.pred.tgt      := Mux(pred_ctrl.nEmpty, head_pred.tgt, io.in.pred.tgt)
   io.pred.branch   := Mux(pred_ctrl.nEmpty, head_pred.branch, io.in.pred.branch)
+  io.pred.rectify  := Mux(pred_ctrl.nEmpty, head_pred.rectify, io.in.pred.rectify)
   io.pred.is_jal   := Mux(pred_ctrl.nEmpty, head_pred.is_jal, io.in.pred.is_jal)
   io.pred.split    := pred_ctrl.empty && io.in.pred.split
   for (i <- 0 until conf.nInst) {

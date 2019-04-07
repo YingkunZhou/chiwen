@@ -28,7 +28,8 @@ class BackEnd(implicit conf: CPUConfig) extends Module with BackParam {
   frontQueue.in.inst := io.front.inst
   frontQueue.in.pred := io.front.pred
   frontQueue.in.pc_split := io.front.pc_split
-
+  frontQueue.xcpt.valid := false.B
+  frontQueue.xcpt.bits  := csr.io.evec
   val instDecoder = Array.fill(nInst)(Module(new InstDecoder).io)
   for (i <- 0 until nInst) instDecoder(i).inst := frontQueue.inst(i).bits
   val in_valid = frontQueue.inst.map(_.valid)
@@ -46,6 +47,8 @@ class BackEnd(implicit conf: CPUConfig) extends Module with BackParam {
   val branchJump = Module(new BranchJump).io
   branchJump.xcpt := false.B
   branchJump.head := stateCtrl.head
+  frontQueue.kill.valid := branchJump.kill.valid
+  frontQueue.kill.bits := branchJump.feedback.bits.tgt
   val inner_kill = RegInit({
     val w = Wire(new KillInfo(wOrder, nBrchjr))
     w.valid := false.B
@@ -53,20 +56,20 @@ class BackEnd(implicit conf: CPUConfig) extends Module with BackParam {
     w.bidx := DontCare
     w
   })
-
+  val instQueue = Array.fill(nInst)(Module(new InstQueue).io)
   inner_kill.valid := branchJump.kill.valid || (frontQueue.pred.split && instQueue(1).in.valid)
   inner_kill.id    := Mux(branchJump.kill.valid, branchJump.kill.id, stateCtrl.physic(1).id)
   inner_kill.bidx  := Mux(branchJump.kill.valid, branchJump.kill.bidx, OHToUInt(branchJump.bid1H))
   stateCtrl.split  := RegNext(!branchJump.kill.valid && frontQueue.pred.split)
 
   val feedback = RegInit({
-    val w = new Bundle {
+    val w = Wire(new Bundle {
       val valid = Bool()
       val redirect = Bool()
       val tgt = UInt(data_width.W)
       val pc  = UInt(data_width.W)
       val typ = UInt(BTBType.SZ.W)
-    }
+    })
     w.valid := false.B
     w.redirect := DontCare
     w.tgt := DontCare
@@ -113,16 +116,15 @@ class BackEnd(implicit conf: CPUConfig) extends Module with BackParam {
   }
   stateCtrl.first := in_valid(0)
 
-  val regfile = Module(new Regfile(data_width, nPhyAddr)).io
+  val regfile = Module(new Regfile).io
   val wb_data = Wire(Vec(nCommit, UInt(data_width.W)))
   val data_wb = Wire(Vec(nCommit, new ByPass(wPhyAddr)))
   val commit = Wire(Vec(nCommit, new Commit(wOrder, wPhyAddr)))
   stateCtrl.commit := commit
-  val bypass_sel = Wire(Vec(nInst, Vec(2, UInt(nCommit.W))))
-  val in_inst = Wire(Vec(2, new InstIssue(wPhyAddr, wOrder)))
-  val instQueue = Array.fill(nInst)(Module(new InstQueue).io)
+  val in_inst = Wire(Vec(nInst, new InstIssue(wPhyAddr, wOrder)))
   val ir_inst = Wire(Vec(nInst, new InstIssue(wPhyAddr, wOrder)))
   val ir_data = Wire(Vec(nInst, Vec(2, UInt(data_width.W))))
+  val bypass_sel = Wire(Vec(nInst, Vec(2, UInt(nCommit.W))))
   for (i <- 0 until nInst) {
     bypass_sel(i) := stateCtrl.physic(i).rs.map(rs =>
       VecInit(data_wb.map(b => b.addr === rs.addr && b.valid)).asUInt)
@@ -132,9 +134,9 @@ class BackEnd(implicit conf: CPUConfig) extends Module with BackParam {
       regfile.r(2*i+j).addr := Mux(instQueue(i).issue.valid,
         instQueue(i).issue.bits.rs(j).addr, stateCtrl.rsaddr(i)(j))
     }
-    in_inst(i).rs(0).addr  := Mux(in_inst(i).info.op2_sel === OP2_UTYPE,
+    in_inst(i).rs(0).addr  := Mux(in_inst(i).info.op2_sel === OP22_UTYPE,
       instDecoder(i).imm7_0(wPhyAddr-1,0), stateCtrl.physic(i).rs(0).addr)
-    in_inst(i).rs(1).addr  := Mux(in_inst(i).info.op2_sel === OP2_UTYPE,
+    in_inst(i).rs(1).addr  := Mux(in_inst(i).info.op2_sel === OP22_UTYPE,
       instDecoder(i).imm7_0(7,  wPhyAddr), stateCtrl.physic(i).rs(1).addr)
     in_inst(i).mem_en       := instDecoder(i).mem_en
     in_inst(i).info.rd      := instDecoder(i).rd
@@ -142,7 +144,7 @@ class BackEnd(implicit conf: CPUConfig) extends Module with BackParam {
     in_inst(i).info.imm     := instDecoder(i).imm
     in_inst(i).info.branch  := frontQueue.pred.brchjr(i) && frontQueue.pred.branch
     in_inst(i).info.op1_sel := Mux(stateCtrl.physic(i).undef(0), OP1_X, instDecoder(i).op1_sel)
-    in_inst(i).info.op2_sel := Mux(stateCtrl.physic(i).undef(1), OP2_X, instDecoder(i).op2_sel)
+    in_inst(i).info.op2_sel := Mux(stateCtrl.physic(i).undef(1), OP22_X, instDecoder(i).op2_sel)
 
     instQueue(i).xcpt := false.B
     instQueue(i).head := stateCtrl.head
@@ -157,7 +159,7 @@ class BackEnd(implicit conf: CPUConfig) extends Module with BackParam {
     }
     instQueue(i).speed(2) := loadStore.forward
 
-    ir_inst(i) := Mux(instQueue(i).issue.valid, instQueue(i).issue.bits, in_inst)
+    ir_inst(i) := Mux(instQueue(i).issue.valid, instQueue(i).issue.bits, in_inst(i))
     stateCtrl.req_id(i) := ir_inst(i).id
 
     ir_data(i)(0) := Mux(ir_inst(i).info.op1_sel === OP1_IMZ, instDecoder(i).imm_z,
@@ -173,15 +175,59 @@ class BackEnd(implicit conf: CPUConfig) extends Module with BackParam {
     regfile.w(i).valid := data_wb(i).valid
     regfile.w(i).addr  := data_wb(i).addr
   }
+  val issue_cap  = Wire(Vec(4, Bool()))
+  val physic_cap = Wire(Vec(4, Bool()))
+  val memory_cap = Wire(Vec(4, Bool()))
+  val branch_cap = Wire(Vec(3, Bool()))
+  val privil_cap = instDecoder.map(!_.privil || stateCtrl.empty)
+  val common = Wire(Vec(4, Bool()))
+  issue_cap(0) := stateCtrl.id_ready(0) && instQueue(0).in.ready
+  issue_cap(1) := stateCtrl.id_ready(0) && instQueue(1).in.ready
+  issue_cap(2) := stateCtrl.id_ready(1) && instQueue(1).in.ready
+  issue_cap(3) := issue_cap(0) && issue_cap(2)
 
-  stateCtrl.bidx1H := branchJump.bid1H
+  physic_cap(0) := !instDecoder(0).rd.valid || stateCtrl.phy_ready(0)
+  physic_cap(1) := !instDecoder(1).rd.valid || stateCtrl.phy_ready(0)
+  physic_cap(2) := !instDecoder(1).rd.valid || stateCtrl.phy_ready(1)
+  physic_cap(3) := physic_cap(0) && physic_cap(2)
+
+  memory_cap(0) := !instDecoder(0).mem_en || loadStore.in(0).ready
+  memory_cap(1) := !instDecoder(1).mem_en || loadStore.in(0).ready
+  memory_cap(2) := !instDecoder(1).mem_en || loadStore.in(1).ready
+  memory_cap(3) := memory_cap(0) && memory_cap(2)
+
+  branch_cap(0) := !frontQueue.pred.brchjr(0) || branchJump.in.ready
+  branch_cap(1) := !frontQueue.pred.brchjr(1) || branchJump.in.ready
+  branch_cap(2) := !frontQueue.pred.brchjr.reduce(_||_) || branchJump.in.ready
+  common(0) := branch_cap(0) && physic_cap(0) && memory_cap(0) && issue_cap(0)
+  common(1) := branch_cap(1) && physic_cap(1) && memory_cap(1) && issue_cap(1)
+  common(2) := branch_cap(1) && physic_cap(2) && memory_cap(2) && issue_cap(2)
+  common(3) := branch_cap(2) && physic_cap(3) && memory_cap(3) && issue_cap(3)
+
+  frontQueue.inst(0).ready := common(0) && privil_cap(0)
+  frontQueue.inst(1).ready := Mux(in_valid(0), common(3), common(1)) && privil_cap(1)
+  stateCtrl.inc_order(0) := Mux(in_valid(0), common(0), common(1) && in_valid(1)) && privil_cap(0)
+  stateCtrl.inc_order(1) := common(2) && in_valid.reduce(_&&_) && privil_cap(1)
+
+  stateCtrl.phy_valid(0) := in_wb(0) && privil_cap(0) && issue_cap(0) && memory_cap(0) && branch_cap(0)
+  stateCtrl.phy_valid(1) := in_wb(1) && privil_cap(1) && Mux(in_valid(0),
+    issue_cap(3) && memory_cap(3) && branch_cap(2),
+    issue_cap(1) && memory_cap(1) && branch_cap(1))
+
+  loadStore.in(0).valid  := in_mem(0) && issue_cap(0) && physic_cap(0)
+  loadStore.in(1).valid  := in_mem(1) && Mux(in_valid(0),
+    issue_cap(3) && physic_cap(3) && branch_cap(0),
+    issue_cap(1) && physic_cap(1))
+
+  branchJump.in.valid := stateCtrl.bkup_alloc && !frontQueue.pred.is_jal
+
   stateCtrl.bkup_alloc := branchJump.in.ready &&
     Mux(in_bj(0), issue_cap(0) && physic_cap(0), in_bj(1) &&
     Mux(in_valid(0), issue_cap(3) && physic_cap(3) && memory_cap(0), issue_cap(1) && physic_cap(1)))
 
+  stateCtrl.bidx1H := branchJump.bid1H
   stateCtrl.brchjr := frontQueue.pred.brchjr
-
-  stateCtrl.kill := inner_kill
+  stateCtrl.kill   := inner_kill
 
   stateCtrl.br_commit := branchJump.commit
   branchJump.in.bits.id := Mux(in_bj(0), stateCtrl.physic(0).id, stateCtrl.physic(1).id)
@@ -198,7 +244,7 @@ class BackEnd(implicit conf: CPUConfig) extends Module with BackParam {
   io.mem <> loadStore.mem
   for (i <- 0 until nInst) {
     loadStore.in(i).bits.id  := stateCtrl.physic(i).id
-    loadStore.in(i).bits.rd  := stateCtrl.physic(i).rd
+    loadStore.in(i).bits.rd  := stateCtrl.physic(i).rd.addr
     loadStore.in(i).bits.fcn := instDecoder(i).mem_fcn
     loadStore.in(i).bits.typ := instDecoder(i).mem_typ
   }
@@ -214,8 +260,8 @@ class BackEnd(implicit conf: CPUConfig) extends Module with BackParam {
                      Mux(in_pvl(1) && stateCtrl.empty, instDecoder(1).csr_cmd, CSR.N))
 
   exe_reg_csr := in_pvl(0)
-  exe_reg_csr_addr := Mux(in_pvl(0), frontQueue.inst(0)(CSR_ADDR_MSB, CSR_ADDR_LSB),
-    frontQueue.inst(1)(CSR_ADDR_MSB, CSR_ADDR_LSB))
+  exe_reg_csr_addr := Mux(in_pvl(0), frontQueue.inst(0).bits(CSR_ADDR_MSB, CSR_ADDR_LSB),
+    frontQueue.inst(1).bits(CSR_ADDR_MSB, CSR_ADDR_LSB))
   csr.io := DontCare
   csr.io.rw.addr  := exe_reg_csr_addr
   csr.io.rw.wdata := Mux(exe_reg_csr, wb_data(0), wb_data(1))
@@ -288,7 +334,7 @@ class BackEnd(implicit conf: CPUConfig) extends Module with BackParam {
         (exe_reg_valid(i) && exe_reg_issue(i).rs(0).valid)
 
       loadStore.issue(i).data := Mux(issueQueue(i).issue.valid,
-        issueQueue(i).issue.bits.info.data, exe_rs_data(i)(1))
+        issueQueue(i).issue.bits.info.data(1), exe_rs_data(i)(1))
 
       loadStore.issue(i).data_ok := Mux(issueQueue(i).issue.valid,
         issueQueue(i).issue.bits.data_ok, exe_reg_issue(i).rs(1).valid)
@@ -333,52 +379,6 @@ class BackEnd(implicit conf: CPUConfig) extends Module with BackParam {
   wb_data(LOAD) := loadStore.wb_data
   data_wb(LOAD) := loadStore.ldcommit.wb
 
-  val issue_cap  = Wire(Vec(4, Bool()))
-  val physic_cap = Wire(Vec(4, Bool()))
-  val memory_cap = Wire(Vec(4, Bool()))
-  val branch_cap = Wire(Vec(3, Bool()))
-  val privil_cap = instDecoder.map(!_.privil || stateCtrl.empty)
-  val common = Wire(Vec(4, Bool()))
-  issue_cap(0) := stateCtrl.id_ready(0) && instQueue(0).in.ready
-  issue_cap(1) := stateCtrl.id_ready(0) && instQueue(1).in.ready
-  issue_cap(2) := stateCtrl.id_ready(1) && instQueue(1).in.ready
-  issue_cap(3) := issue_cap(0) && issue_cap(2)
-
-  physic_cap(0) := !instDecoder(0).rd.valid || stateCtrl.phy_ready(0)
-  physic_cap(1) := !instDecoder(1).rd.valid || stateCtrl.phy_ready(0)
-  physic_cap(2) := !instDecoder(1).rd.valid || stateCtrl.phy_ready(1)
-  physic_cap(3) := physic_cap(0) && physic_cap(2)
-
-  memory_cap(0) := !instDecoder(0).mem_en || loadStore.in(0).ready
-  memory_cap(1) := !instDecoder(1).mem_en || loadStore.in(0).ready
-  memory_cap(2) := !instDecoder(1).mem_en || loadStore.in(1).ready
-  memory_cap(3) := memory_cap(0) && memory_cap(2)
-
-  branch_cap(0) := !frontQueue.pred.brchjr(0) || branchJump.in.ready
-  branch_cap(1) := !frontQueue.pred.brchjr(1) || branchJump.in.ready
-  branch_cap(2) := branch_cap.reduce(_&&_)
-  common(0) := branch_cap(0) && physic_cap(0) && memory_cap(0) && issue_cap(0)
-  common(1) := branch_cap(1) && physic_cap(1) && memory_cap(1) && issue_cap(1)
-  common(2) := branch_cap(1) && physic_cap(2) && memory_cap(2) && issue_cap(2)
-  common(3) := branch_cap(2) && physic_cap(3) && memory_cap(3) && issue_cap(3)
-
-  frontQueue.inst(0).ready := common(0) && privil_cap(0)
-  frontQueue.inst(0).ready := Mux(in_valid(0), common(3), common(1)) && privil_cap(1)
-  stateCtrl.inc_order(0) := Mux(in_valid(0), common(0), common(1) && in_valid(1)) && privil_cap(0)
-  stateCtrl.inc_order(1) := common(2) && in_valid.reduce(_&&_) && privil_cap(1)
-
-  stateCtrl.phy_valid(0) := in_wb(0) && privil_cap(0) && issue_cap(0) && memory_cap(0) && branch_cap(0)
-  stateCtrl.phy_valid(1) := in_wb(1) && privil_cap(1) && Mux(in_valid(0),
-    issue_cap(3) && memory_cap(3) && branch_cap(2),
-    issue_cap(1) && memory_cap(1) && branch_cap(1))
-
-  loadStore.in(0).valid  := in_mem(0) && issue_cap(0) && physic_cap(0)
-  loadStore.in(1).valid  := in_mem(1) && Mux(in_valid(0),
-    issue_cap(3) && physic_cap(3) && branch_cap(0),
-    issue_cap(1) && physic_cap(1))
-
-  branchJump.in.valid := stateCtrl.bkup_alloc && !frontQueue.pred.is_jal
-
   val issue_cmp = CmpId(exe_reg_issue(0).id, exe_reg_issue(1).id, stateCtrl.head)
   val self_alive = Wire(Vec(nALU, Bool()))
   val self_ready = Wire(Vec(nInst, Bool()))
@@ -420,8 +420,8 @@ class BackEnd(implicit conf: CPUConfig) extends Module with BackParam {
         CmpId(issueQueue(2).tail.id, exe_reg_issue(i).id, stateCtrl.head)))
     issue_valid(i) := exe_reg_valid(i) && self_ready(i) && self_alive(i)
     issueQueue(i).in.valid := exe_reg_valid(i) && (!self_ready(i) || issueQueue(i).issue.valid)
-    issueQueue(i).in.bits  := exe_reg_issue
-    issueQueue(i).in.bits.info.data := exe_op_data //only change data
+    issueQueue(i).in.bits  := exe_reg_issue(i)
+    issueQueue(i).in.bits.info.data := exe_op_data(i) //only change data
   }
 
 }

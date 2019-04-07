@@ -187,7 +187,7 @@ class StoreQueue(val nStore: Int, id_width: Int, data_width: Int, val nLoad: Int
 
 class LoadStore extends Module with LsParam {
   val io = IO(new Bundle {
-    val in  = Vec(nInst, Flipped(Decoupled(new LsEntry(wOrder, wPhyAddr))))
+    val in  = Vec(nInst, Flipped(DecoupledIO(new LsEntry(wOrder, wPhyAddr))))
     val mem_en = Input(Bool())
     val mem_first = Input(Vec(2, Bool())) //TODO: load or store within raw valid
 
@@ -544,9 +544,11 @@ class LoadStore extends Module with LsParam {
   }
 
   mem.out_stall := mem_reg.valid.reduce(_||_) && !io.mem.resp.valid
-  mem.tot_stall := mem.out_stall || mem.fwd_stall
   mem.fwd_stall := mem_reg.valid(LD) && (0 until data_width/8).map(i => mem_reg.byte_en(i) &&
     !Mux1H(mem_reg.fwd_mux1H(i), store_queue.data_ok)).reduce(_||_) //addr ok but data not ok
+
+  mem.tot_stall := mem.out_stall || mem.fwd_stall
+
 
   mem.bwd_above := Above(store_queue.ldq_ptr(wLoad-1,0), nLoad)
   mem.bwd_conti := store_queue.ldq_ptr(wLoad) === load_queue.tail(0)(wLoad)

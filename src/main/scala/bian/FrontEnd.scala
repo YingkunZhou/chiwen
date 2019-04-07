@@ -2,7 +2,7 @@ package bian
 
 import chisel3._
 import chisel3.util.{Cat, Fill}
-import common.CPUConfig
+import common.{AxiIO, CPUConfig}
 
 class Predict(val data_width: Int) extends Bundle {
   val redirect = Bool() // = 0 cont || = 1 jump
@@ -10,11 +10,11 @@ class Predict(val data_width: Int) extends Bundle {
 }
 
 class PredictInfo(data_width: Int) extends Predict(data_width) {
-  val branch = Bool()
-  val brchjr = Vec(2, Bool()) //determine pick which btb
-  val is_jal = Bool()
-  val rectify = Bool()
-  val split = Bool() //mainly caused by jal
+  val branch  = Bool()
+  val brchjr  = Vec(2, Bool()) //determine pick which btb
+  val rectify = Vec(2, Bool())
+  val is_jal  = Bool()
+  val split   = Bool() //mainly caused by jal
 }
 
 class PredictReg(val inst_width: Int, data_width: Int)
@@ -122,6 +122,7 @@ class FrontEnd(implicit conf: CPUConfig) extends Module with BTBParams {
   io.back.pred.rectify(1) := pred_reg.rectify(1) || rectify.valid
   io.back.pred.brchjr     := pred_reg.brchjr
   io.back.pred.branch     := pred_reg.branch
+  io.back.pred.is_jal     := pred_reg.is_jal
   io.back.pc_split        := pred_reg.split
 
   btb.if_pc    := if_reg_pc

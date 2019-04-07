@@ -2,7 +2,7 @@ package bian
 
 import chisel3._
 import chisel3.util._
-import common.{CPUConfig, Str}
+import common.{AxiIO, CPUConfig, Str}
 
 object LatchData {
   def apply(in: Bool, data: UInt, deflt: UInt = 0.U): UInt = {

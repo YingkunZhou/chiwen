@@ -30,7 +30,6 @@ class BranchJump extends Module with BjParam {
   val io = IO(new Bundle {
     val in = Flipped(DecoupledIO(new BrjrEntryIO(wOrder, data_width)))
     val bid1H = Output(UInt(nEntry.W)) //alloc
-    val split = Output(Bool()) //cancel the latter
 
     val issue = Input(Vec(3, new BrjrIssueIO(wOrder)))
     val target = Input(Vec(3, UInt(data_width.W)))
