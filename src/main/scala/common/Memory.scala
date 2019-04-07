@@ -19,10 +19,11 @@ import chisel3.util.{DecoupledIO, ValidIO, log2Ceil, Cat, Fill, MuxCase}
 trait MemoryOpConstants 
 {
    val MT_X  = 0.asUInt(3.W)
+   val MT_D  = 4.asUInt(3.W)
+
    val MT_B  = 1.asUInt(3.W)
    val MT_H  = 2.asUInt(3.W)
    val MT_W  = 3.asUInt(3.W)
-   val MT_D  = 4.asUInt(3.W)
    val MT_BU = 5.asUInt(3.W)
    val MT_HU = 6.asUInt(3.W)
    val MT_WU = 7.asUInt(3.W)
@@ -65,15 +66,15 @@ class SyncMem(val addrWidth : Int) extends BlackBox{
 }
 
 // from the pov of the datapath
-class MemPortIo(val data_width: Int)(implicit val conf: CPUConfig) extends Bundle
+class MemPortIo(val data_width: Int) extends Bundle
 {
    val req    = new DecoupledIO(new MemReq(data_width))
    val resp   = Flipped(new ValidIO(new MemResp(data_width)))
 }
 
-class MemReq(val data_width: Int)(implicit val conf: CPUConfig) extends Bundle
+class MemReq(val data_width: Int) extends Bundle
 {
-   val addr = Output(UInt(conf.xprlen.W))
+   val addr = Output(UInt(data_width.W))
    val data = Output(UInt(data_width.W))
    val fcn  = Output(UInt(M_X.getWidth.W))  // memory function code
    val typ  = Output(UInt(MT_X.getWidth.W)) // memory type
@@ -119,7 +120,7 @@ class AsyncScratchPadMemory(val num_core_ports: Int,val num_bytes: Int = (1 << 2
    when (io.core_ports(DPORT).req.valid && (io.core_ports(DPORT).req.bits.fcn === M_XWR))
    {
       async_data.io.dw.en := true.B
-      async_data.io.dw.data := io.core_ports(DPORT).req.bits.data << (req_addri(1,0) << 3)
+      async_data.io.dw.data := io.core_ports(DPORT).req.bits.data << (req_addri(1,0) << 3).asUInt
       async_data.io.dw.addr := Cat(req_addri(31,2),0.asUInt(2.W))
       async_data.io.dw.mask := Mux(req_typi === MT_B,1.U << req_addri(1,0),
                               Mux(req_typi === MT_H,3.U << req_addri(1,0),15.U))
@@ -185,7 +186,7 @@ class SyncScratchPadMemory(val num_core_ports: Int, val num_bytes: Int = (1 << 2
    when (io.core_ports(DPORT).req.valid && (io.core_ports(DPORT).req.bits.fcn === M_XWR))
    {
       sync_data.io.dw.en := true.B
-      sync_data.io.dw.data := io.core_ports(DPORT).req.bits.data << (req_addri(1,0) << 3)
+      sync_data.io.dw.data := io.core_ports(DPORT).req.bits.data << (req_addri(1,0) << 3).asUInt
       sync_data.io.dw.addr := Cat(req_addri(31,2),0.asUInt(2.W))
       sync_data.io.dw.mask := Mux(io.core_ports(DPORT).req.bits.typ === MT_B,1.U << req_addri(1,0),
                               Mux(io.core_ports(DPORT).req.bits.typ === MT_H,3.U << req_addri(1,0),15.U))

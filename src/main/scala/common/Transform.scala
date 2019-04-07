@@ -2,7 +2,37 @@ package common
 
 import chisel3._
 import chisel3.util.Cat
-import myCore.{AxiIO, Latch}
+
+class AxiRIO(val data_width: Int) extends Bundle {
+  val data     = Input(UInt(data_width.W))
+  val valid    = Input(Bool())
+  val last     = Input(Bool())
+  val id       = Input(UInt(4.W))
+}
+
+class AxiARIO(val data_width: Int) extends Bundle {
+  val ready   = Input(Bool())
+  val valid   = Output(Bool())
+  val id      = Output(UInt(4.W))
+  val addr    = Output(UInt(data_width.W))
+  val burst   = Output(UInt(2.W))
+  val size    = Output(UInt(3.W))
+  val len     = Output(UInt(8.W))
+}
+
+class AxiIO(val data_width: Int) extends Bundle {
+  val r  = new AxiRIO(data_width)
+  val ar = new AxiARIO(data_width)
+}
+
+object Latch {
+  def apply(in: Bool, wait: Bool, addition: Bool = true.B): Bool = {
+    val in_latch = RegInit(false.B)
+    when (wait) { in_latch := false.B
+    }.elsewhen(in && addition) {in_latch := true.B}
+    in || in_latch
+  }
+}
 
 class Transform(implicit conf: CPUConfig) extends Module {
   val io = IO(new Bundle {
@@ -87,27 +117,7 @@ class SimpleTrans(implicit conf: CPUConfig) extends Module {
     val outer = new MemPortIo(conf.xprlen)
     val inner = Flipped(new MemPortIo(conf.xprlen))
   })
-
-  val lfsr5 = RegInit(1.U(5.W))
-  lfsr5 := Cat(lfsr5(3,0), lfsr5(4)^lfsr5(2))
-
-  val cnt = RegInit(0.U(3.W))
-  val expect_cnt = RegInit(0.U(3.W))
-  val valid = RegInit(false.B)
-  when (io.inner.req.valid) {
-    valid := true.B
-    cnt := cnt + 1.U
-    expect_cnt := lfsr5(2,0)
-  }.elsewhen(cnt =/= expect_cnt) {
-    cnt := cnt + 1.U
-  }.otherwise {
-    valid := false.B
-  }
-
-  io.inner <> io.outer
-//  io.inner.resp <> io.outer.resp
-//  io.inner.req.bits <> io.outer.req.bits
-//  io.outer.req.valid := valid && cnt === expect_cnt
-//  io.inner.req.ready := io.outer.req.ready
+  io.outer.req  <> io.inner.req
+  io.inner.resp := RegNext(io.outer.resp)
 
 }

@@ -12,4 +12,6 @@ case class CPUConfig()
   val verbose = false
   val incRd: UInt = 0.U(4.W)
   val iccRd: UInt = 1.U(4.W)
+  val inst_width = 32
+  val data_width = 32
 }
