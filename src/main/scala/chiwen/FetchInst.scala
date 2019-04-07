@@ -2,7 +2,7 @@ package chiwen
 
 import chisel3._
 import chisel3.util._
-import common.{CPUConfig, Str}
+import common.{AxiIO, CPUConfig, Str}
 
 object LatchData {
   def apply(valid: Bool, data: UInt): UInt = {

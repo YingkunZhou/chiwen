@@ -34,7 +34,7 @@ class ALU(implicit conf: CPUConfig) extends Module {
 
   //only for debug purposes right now until debug() works
   val result = Wire(UInt(conf.xprlen.W))
-  result := MuxCase(0.U, Array(   // FIXME: why default is exe_reg_inst
+  result := MuxCase(0.U, Array( // FIXME: one Hot
     (io.ctrl.fun === ALU_ADD)   -> add_result,
     (io.ctrl.fun === ALU_SUB)   -> (io.op1 - io.op2).asUInt,
     (io.ctrl.fun === ALU_AND)   -> (io.op1 & io.op2).asUInt,

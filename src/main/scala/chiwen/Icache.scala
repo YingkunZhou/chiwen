@@ -2,7 +2,8 @@ package chiwen
 
 import chisel3._
 import chisel3.util._
-import common.{CPUConfig, Str}
+import common.{AxiIO, CPUConfig, Str}
+
 import scala.math.pow
 
 trait ICCParams { // FIXME: the last two bits of pc must be 00
@@ -19,28 +20,6 @@ class CoreIO(val data_width: Int) extends Bundle {
   val pc        = Input(Valid(UInt(data_width.W)))
   val inst      = Output(Valid(UInt(data_width.W)))
   val ready     = Output(Bool())
-}
-
-class AxiRIO(val data_width: Int) extends Bundle {
-  val data     = Input(UInt(data_width.W))
-  val valid    = Input(Bool())
-  val last     = Input(Bool())
-  val id       = Input(UInt(4.W))
-}
-
-class AxiARIO(val data_width: Int) extends Bundle {
-  val ready   = Input(Bool())
-  val valid   = Output(Bool())
-  val id      = Output(UInt(4.W))
-  val addr    = Output(UInt(data_width.W))
-  val burst   = Output(UInt(2.W))
-  val size    = Output(UInt(3.W))
-  val len     = Output(UInt(8.W))
-}
-
-class AxiIO(val data_width: Int) extends Bundle {
-  val r  = new AxiRIO(data_width)
-  val ar = new AxiARIO(data_width)
 }
 
 object Latch {

@@ -2,7 +2,7 @@ package chiwen
 
 import chisel3._
 import chisel3.util.Valid
-import common.{CPUConfig, MemPortIo}
+import common.{AxiIO, CPUConfig, MemPortIo}
 
 class InterfaceIO(val data_width: Int) extends Bundle {
   val xcpt = Input(new Valid(UInt(data_width.W)))

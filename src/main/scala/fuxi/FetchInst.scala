@@ -2,7 +2,7 @@ package fuxi
 
 import chisel3._
 import chisel3.util._
-import common.{CPUConfig, Str}
+import common.{AxiIO, CPUConfig, Str}
 
 object LatchData {
   def apply(in: Bool, data: UInt, deflt: UInt = 0.U): UInt = {
@@ -27,6 +27,7 @@ class FetchInst(implicit conf: CPUConfig) extends Module with BTBParams {
     val dec_kill   = Input(Bool()) // from exe and downflow
     val inst       = Output(Vec(2, Valid(UInt(conf.xprlen.W))))
     val dec_pc     = Output(Vec(2, UInt(conf.xprlen.W)))
+    val inst_split = Input(Bool())
   })
 
   val pc = Wire(UInt(conf.xprlen.W))
@@ -75,14 +76,10 @@ class FetchInst(implicit conf: CPUConfig) extends Module with BTBParams {
     }
   }
 
-  when (pc_valid) {
-    inst_kill := io.if_kill
-  }.elsewhen(inst_valid_orR) {
-    inst_kill := false.B
-  }.elsewhen(io.dec_kill && state === sWtInstOK) {
-    inst_kill := true.B
+  when (pc_valid) { inst_kill := io.if_kill //very important logic
+  }.elsewhen(inst_valid_orR) { inst_kill := false.B
+  }.elsewhen(io.dec_kill && state === sWtInstOK) { inst_kill := true.B
   }
-
   val pc_odd_reg = RegInit(false.B)
   val state_WtForward = RegInit(false.B)
 
@@ -96,21 +93,26 @@ class FetchInst(implicit conf: CPUConfig) extends Module with BTBParams {
     ((inst_kill || (inst_split  && io.pc(conf.pcLSB).toBool) ||
     (io.forward(1) && (inst_valid(1) || inst_split))) && inst_valid_orR))
 
+  val maintain = RegInit(true.B)
   io.inst(0).valid := ( inst_valid(0) && !inst_kill) || state_WtForward
-  io.inst(1).valid := ((inst_valid(1) && !inst_kill) || state === sWtForward) && !inst_split
+  io.inst(1).valid := ((inst_valid(1) && !inst_kill) || (state === sWtForward && maintain)) && !inst_split
 
-  val pc_odd_wire = inst_valid(0) && !inst_valid(1) && !inst_split && !inst_kill
+  val pc_odd_wire: Bool = inst_valid(0) && !inst_valid(1) && !inst_split && !inst_kill
   when (addr_ready) { pc_odd_reg := false.B
-  }.elsewhen(pc_odd_wire) { pc_odd_reg := true.B }
-
+  }.elsewhen(pc_odd_wire) { pc_odd_reg := true.B
+  }
   val pc_odd = Wire(Vec(conf.nInst, Bool()))
   pc_odd(0) := pc_odd(1) || io.pc(conf.pcLSB).toBool
   pc_odd(1) := pc_odd_reg || pc_odd_wire
 
   pc := Mux(pc_odd(1), io.dec_pc(1), io.pc)
 
-  when (io.dec_kill || io.forward(0) || inst_kill) { state_WtForward := false.B
-  }.elsewhen(inst_valid(0)) { state_WtForward := true.B  }
+  when (io.dec_kill || io.forward(0)) { state_WtForward := false.B
+  }.elsewhen(inst_valid(0) && !inst_kill) { state_WtForward := true.B
+  } //FIXME: wonder why inst_kill don't make sense
+  when (io.dec_kill || io.forward(1)) { maintain := true.B
+  }.elsewhen(state === sWtForward && io.inst_split) { maintain := false.B
+  }
 
   /*=======================dec part==============================*/
   val reg_pc   = Reg(Vec(2, UInt(conf.data_width.W)))

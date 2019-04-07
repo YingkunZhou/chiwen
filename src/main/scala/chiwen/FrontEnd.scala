@@ -1,7 +1,7 @@
 package chiwen
 
 import chisel3._
-import common.CPUConfig
+import common.{AxiIO, CPUConfig}
 
 class FrontEnd (implicit conf: CPUConfig) extends Module with BTBParams {
   val io = IO(new Bundle{
