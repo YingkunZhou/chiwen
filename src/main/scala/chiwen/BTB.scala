@@ -5,7 +5,8 @@ import chisel3.util._
 import common.CPUConfig
 
 trait BTBParams {
-  val nEntries: Int = 32
+  val nEntries: Int = 64
+  require(nEntries == 64 || nEntries == 32)
   val nPages  : Int = 4
   val nRAS    : Int = 8
   val OFF_MSB : Int = 13
@@ -14,10 +15,12 @@ trait BTBParams {
 }
 
 object CFIType {
-  val invalid = 0
-  val retn    = 1
-  val branch  = 2
-  val jump    = 3
+//  val invalid = 0
+//  val retn    = 1
+//  val branch  = 2
+//  val jump    = 3
+  val branch  = 0
+  val jump    = 1
   val NUM = jump + 1
   val SZ = log2Ceil(NUM)
 }
@@ -35,7 +38,7 @@ class BTB(implicit conf: CPUConfig) extends Module with BTBParams {
     // pc stage inquire
     val if_pc = Input(UInt(conf.xprlen.W))
     val fb_pc = Input(UInt(conf.xprlen.W))
-    val raspeek  = Input(UInt(conf.xprlen.W)) // used for return type
+//    val raspeek  = Input(UInt(conf.xprlen.W)) // used for return type
     val predict  = Output(new Predict(conf.xprlen))
     val feedBack = Input(new Predict(conf.xprlen))
 
@@ -77,7 +80,7 @@ class BTB(implicit conf: CPUConfig) extends Module with BTBParams {
   * 2. if it is branch, then use brjump, but need to check take or not
   * 3. if it is jump, then use brjump
   * */
-  val pc_cands = Wire(Vec(CFIType.NUM, UInt(conf.xprlen.W)))
+//  val pc_cands = Wire(Vec(CFIType.NUM, UInt(conf.xprlen.W)))
   val pc_plus: UInt = io.if_pc + 4.U(conf.xprlen.W)
   pc_offset  := io.if_pc(OFF_MSB, OFF_LSB)
   off_matches:= pc_offsets.map(_ === pc_offset)
@@ -87,15 +90,17 @@ class BTB(implicit conf: CPUConfig) extends Module with BTBParams {
   hcnt       := Mux1H(off_sel, hcnts)
   brjmp      := Cat(tg_page, tg_offset, 0.U(OFF_LSB.W))
 
-  pc_cands(CFIType.invalid) := pc_plus
-  pc_cands(CFIType.retn)    := io.raspeek
-  pc_cands(CFIType.jump)    := brjmp
-  pc_cands(CFIType.branch)  := brjmp
+//  pc_cands(CFIType.invalid) := pc_plus
+//  pc_cands(CFIType.retn)    := io.raspeek
+//  pc_cands(CFIType.jump)    := brjmp
+//  pc_cands(CFIType.branch)  := brjmp
   // pc_cands(i)(CFIType.branch) := Mux(hcnt(i)(1).toBool, brjmp(i), pc_plus)
   // FIXME: can optimized???
   io.predict.redirect := io.predict.you && (cfiType =/= CFIType.branch.U || hcnt(1).toBool)
   io.predict.you := off_sel.orR
-  io.predict.tgt := pc_cands(Mux(io.predict.redirect, cfiType, CFIType.invalid.U))
+//  io.predict.tgt := pc_cands(Mux(io.predict.redirect, cfiType, CFIType.invalid.U))
+  io.predict.tgt := Mux(io.predict.redirect,
+    Cat(tg_page, tg_offset, 0.U(OFF_LSB.W)), pc_plus)
   io.predict.idx := OHToUInt(off_sel)
   io.predict.typ := cfiType
   /*
@@ -134,10 +139,18 @@ class BTB(implicit conf: CPUConfig) extends Module with BTBParams {
   val off_valids_N: UInt = (~off_valids.asUInt).asUInt /*| pg_idx_matches.asUInt*/ // for time conside otherwise it is linear
   val off_insert: Bool = off_valids_N.orR
   val new_off_idx = PriorityEncoder(off_valids_N)
-  require(nEntries == 32)
-  val lfsr5 = RegInit(1.U(log2Ceil(nEntries).W))
-  lfsr5 := Cat(lfsr5(log2Ceil(nEntries)-2,0), lfsr5(4)^lfsr5(2))
-  val off_idx = Mux(off_insert, new_off_idx, lfsr5)
+  val off_idx = Wire(UInt(log2Ceil(nEntries).W))
+
+  if (nEntries == 64) {
+    val lfsr6 = RegInit(32.U(log2Ceil(nEntries).W))
+    lfsr6 := Cat(lfsr6(1)^lfsr6(0), lfsr6(log2Ceil(nEntries)-1,1))
+    off_idx := Mux(off_insert, new_off_idx, lfsr6)
+  } else {
+    val lfsr5 = RegInit(1.U(log2Ceil(nEntries).W))
+    lfsr5 := Cat(lfsr5(log2Ceil(nEntries)-2,0), lfsr5(4)^lfsr5(2))
+    off_idx := Mux(off_insert, new_off_idx, lfsr5)
+  }
+
   /*
   * 1. offset insert, page insert
   * 2. offset insert, page replace
