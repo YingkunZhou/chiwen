@@ -116,8 +116,25 @@ class SimpleTrans(implicit conf: CPUConfig) extends Module {
   val io = IO(new Bundle {
     val outer = new MemPortIo(conf.xprlen)
     val inner = Flipped(new MemPortIo(conf.xprlen))
+    val cyc = Input(UInt(conf.xprlen.W))
   })
-  io.outer.req  <> io.inner.req
-  io.inner.resp := RegNext(io.outer.resp)
-
+  io.inner.req.ready := true.B
+  val valid = RegInit(false.B)
+  val bits  = Reg(new MemReq(conf.data_width))
+  val stall = valid && !io.outer.resp.valid
+  when (!stall) {
+    valid := io.inner.req.valid
+    bits  := io.inner.req.bits
+  }
+  //TODO: print memory trace
+  io.outer.req.valid := valid
+  io.outer.req.bits  := bits
+  io.inner.resp := io.outer.resp
+  when (io.inner.req.valid && !stall && io.inner.req.bits.fcn === M_XWR) {
+    printf("Memory: Cyc= %d WB[ %x %x %x]\n",
+      io.cyc,
+      io.inner.req.bits.typ,
+      io.inner.req.bits.addr,
+      io.inner.req.bits.data)
+  }
 }
