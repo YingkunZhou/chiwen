@@ -25,7 +25,6 @@ class ExeCrtl extends MemCrtl {
   val br_type = UInt(BR_N.getWidth.W)
   val branch  = Bool()
 //  val jump    = UInt(Jump.NUM.W)
-  val btb_you = Bool()
 }
 
 class DecCrtl extends Bundle {
@@ -50,11 +49,11 @@ class Mem(implicit val conf: CPUConfig) extends Wb {
   val mem_typ  = UInt(MT_X.getWidth.W)
 }
 
-class Exe(val nEntries : Int)(implicit conf: CPUConfig) extends Mem {
+class Exe(implicit conf: CPUConfig) extends Mem {
   val br_type  = UInt(BR_N.getWidth.W)
   val branch   = Bool()
 //  val jump     = UInt(Jump.NUM.W)
-  val btb      = new Predict(conf.xprlen)
+  val pred     = new Predict(conf.xprlen)
   val op1_data = UInt(conf.xprlen.W)
   val op2_data = UInt(conf.xprlen.W)
   val alu_fun  = UInt(ALU_X.getWidth.W)
@@ -84,7 +83,7 @@ class BackEnd(implicit conf: CPUConfig) extends Module with BTBParams {
   val dec       = Module(new InstDecoder()).io
   val dec_wire  = Wire(new DecCrtl)
   val dec_valid = Wire(Bool())
-  val exe       = Reg(new Exe(nEntries))
+  val exe       = Reg(new Exe)
   val exe_valid = RegInit(false.B)
   val exe_wire  = Wire(new ExeCrtl)
   val mem       = Reg(new Mem())
@@ -165,7 +164,7 @@ class BackEnd(implicit conf: CPUConfig) extends Module with BTBParams {
     exe.mem_typ  := dec.cinfo.mem_typ
     exe.branch   := dec.cinfo.is_branch
 //    exe.jump     := io.front.jump
-    exe.btb      := io.front.pred
+    exe.pred     := io.front.pred
   }
   // Execute Stage ==========================================================================================================================================
   //=========================================================================================================================================================
@@ -176,7 +175,6 @@ class BackEnd(implicit conf: CPUConfig) extends Module with BTBParams {
   exe_wire.branch  := exe_valid && exe.branch
 //  exe_wire.jump    := Mux(exe_valid, exe.jump, 0.U)
   exe_wire.illegal := exe.illegal && exe_valid
-  exe_wire.btb_you := exe.btb.you && exe_valid
 
   val alu = Module(new ALU()).io
   alu.op1          := exe.op1_data
@@ -193,9 +191,6 @@ class BackEnd(implicit conf: CPUConfig) extends Module with BTBParams {
 //  io.front.ras_push.valid := Pulse(exe_wire.jump(Jump.push).toBool, !stall(Stage.MEM))
 //  io.front.ras_push.bits  := alu.target.conti
 
-  io.front.feedBack.you := Pulse(exe_wire.btb_you, !stall(Stage.MEM))
-  io.front.feedBack.idx := exe.btb.idx
-  io.front.feedBack.redirect := Pulse(alu.ctrl.pc_sel === PC_BRJMP || alu.ctrl.pc_sel === PC_JALR, !stall(Stage.MEM))
   io.front.fb_pc := exe.pc
 //  val bj_type =
 //    Mux(exe_wire.branch,                                      CFIType.branch.U,
@@ -203,18 +198,19 @@ class BackEnd(implicit conf: CPUConfig) extends Module with BTBParams {
 //    Mux(exe_wire.jump(Jump.none) || exe_wire.jump(Jump.push), CFIType.jump.U,
 //                                                              CFIType.invalid.U
 //    )))
-  val bj_type = Mux(exe_wire.branch, CFIType.branch.U, CFIType.jump.U)
 
+  io.front.fb_type := Mux(exe_wire.branch, BTBType.branch.U, BTBType.jump.U)
   val next_pc =
     Mux(alu.ctrl.pc_sel === PC_BRJMP, alu.target.brjmp,
     Mux(alu.ctrl.pc_sel === PC_JALR,  alu.target.jpreg,
                                       alu.target.conti
     ))
-  io.front.feedBack.typ := bj_type
-  io.front.feedBack.tgt := next_pc
+  io.front.feedBack.valid    := exe_wire.br_type =/= BR_N
+  io.front.feedBack.bits.tgt := next_pc
+  io.front.feedBack.bits.redirect := Pulse(alu.ctrl.pc_sel === PC_BRJMP || alu.ctrl.pc_sel === PC_JALR, !stall(Stage.MEM))
 
   val mispredict = Wire(Bool())
-  if (conf.hasBTB) mispredict := next_pc =/= exe.btb.tgt && exe_valid
+  if (conf.hasBTB) mispredict := next_pc =/= exe.pred.tgt && exe_valid
   else mispredict := alu.ctrl.pc_sel =/= PC_4 && exe_valid
 
   val mem_reg_exe_out = Reg(UInt(conf.xprlen.W))
@@ -341,10 +337,4 @@ class BackEnd(implicit conf: CPUConfig) extends Module with BTBParams {
     , Mux(csr.io.illegal, Str("X"), Str(" "))
     , Mux(io.front.xcpt.valid || !exe_valid, BUBBLE, exe.inst)
   )
-
-  if (conf.verbose) {
-    when (io.cyc > 16427.U && io.cyc < 16475.U) {
-      printf(p"Debug: target = ${Hexadecimal(io.front.feedBack.tgt)} dec_kill = ${io.front.kill}\n")
-    }
-  }
 }

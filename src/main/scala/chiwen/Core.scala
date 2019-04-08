@@ -16,7 +16,8 @@ class InterfaceIO(val data_width: Int) extends Bundle {
 //  val ras_pop  = Input(Bool())
 //  val ras_push = Input(Valid(UInt(data_width.W)))
   val fb_pc    = Input(UInt(data_width.W))
-  val feedBack = Input(new Predict(data_width))
+  val fb_type  = Input(UInt(BTBType.SZ.W))
+  val feedBack = Input(Valid(new Predict(data_width)))
 }
 
 class Core(implicit conf: CPUConfig) extends Module with BTBParams {

@@ -4,6 +4,10 @@ import chisel3._
 import chisel3.util.{DecoupledIO, RegEnable, Mux1H}
 import common.Util._
 
+object CycRange {
+  def apply(cyc: UInt, i: Int,j: Int): Bool = cyc >= i.U && cyc <= j.U
+}
+
 object DMConsts{
 
   def dmiDataSize = 32
