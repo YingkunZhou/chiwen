@@ -23,8 +23,11 @@ class Tile(implicit val conf: CPUConfig) extends Module
   memory.io.core_ports(1) <> trans.io.outer
   core.io.imem <> trans.io.inner
   trans.io.cyc := core.io.cyc
+
   memory.io.core_ports(0) <> simpleTrans.io.outer
   core.io.dmem <> simpleTrans.io.inner
+  simpleTrans.io.cyc := core.io.cyc
+
   debug.io.debugmem <> memory.io.debug_port
 
   core.reset := debug.io.resetcore | reset.toBool
