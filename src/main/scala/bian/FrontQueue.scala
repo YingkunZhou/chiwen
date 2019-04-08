@@ -67,6 +67,7 @@ class FrontQueue(implicit val conf: CPUConfig) extends Module with FrontParam {
     w.pc  := START_ADDR
     w.ptr := Seq.fill(2)(0.U((wEntry+1).W))
     w.cancel := DontCare
+    w.inst_split := DontCare
     w.pc_split   := DontCare
     w
   })
