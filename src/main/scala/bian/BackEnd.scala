@@ -28,6 +28,7 @@ class BackEnd(implicit conf: CPUConfig) extends Module with BackParam {
   frontQueue.in.inst := io.front.inst
   frontQueue.in.pred := io.front.pred
   frontQueue.in.pc_split := io.front.pc_split
+  frontQueue.in.inst_split := io.front.inst_split
   frontQueue.xcpt.valid := false.B
   frontQueue.xcpt.bits  := csr.io.evec
   val instDecoder = Array.fill(nInst)(Module(new InstDecoder).io)
@@ -175,16 +176,20 @@ class BackEnd(implicit conf: CPUConfig) extends Module with BackParam {
     regfile.w(i).valid := data_wb(i).valid
     regfile.w(i).addr  := data_wb(i).addr
   }
+  val common = Wire(Vec(4, Bool()))
   val issue_cap  = Wire(Vec(4, Bool()))
   val physic_cap = Wire(Vec(4, Bool()))
   val memory_cap = Wire(Vec(4, Bool()))
   val branch_cap = Wire(Vec(3, Bool()))
-  val privil_cap = instDecoder.map(!_.privil || stateCtrl.empty)
-  val common = Wire(Vec(4, Bool()))
-  issue_cap(0) := stateCtrl.id_ready(0) && instQueue(0).in.ready
-  issue_cap(1) := stateCtrl.id_ready(0) && instQueue(1).in.ready
-  issue_cap(2) := stateCtrl.id_ready(1) && instQueue(1).in.ready
-  issue_cap(3) := issue_cap(0) && issue_cap(2)
+  val privil_cap = Wire(Vec(2, Bool()))
+
+  privil_cap(0) := !instDecoder(0).privil  || stateCtrl.empty
+  privil_cap(1) := !(instDecoder(0).privil || instDecoder(1).privil) || stateCtrl.empty
+
+  issue_cap(0)  := stateCtrl.id_ready(0) && instQueue(0).in.ready
+  issue_cap(1)  := stateCtrl.id_ready(0) && instQueue(1).in.ready
+  issue_cap(2)  := stateCtrl.id_ready(1) && instQueue(1).in.ready
+  issue_cap(3)  := issue_cap(0) && issue_cap(2)
 
   physic_cap(0) := !instDecoder(0).rd.valid || stateCtrl.phy_ready(0)
   physic_cap(1) := !instDecoder(1).rd.valid || stateCtrl.phy_ready(0)
@@ -199,6 +204,7 @@ class BackEnd(implicit conf: CPUConfig) extends Module with BackParam {
   branch_cap(0) := !frontQueue.pred.brchjr(0) || branchJump.in.ready
   branch_cap(1) := !frontQueue.pred.brchjr(1) || branchJump.in.ready
   branch_cap(2) := !frontQueue.pred.brchjr.reduce(_||_) || branchJump.in.ready
+
   common(0) := branch_cap(0) && physic_cap(0) && memory_cap(0) && issue_cap(0)
   common(1) := branch_cap(1) && physic_cap(1) && memory_cap(1) && issue_cap(1)
   common(2) := branch_cap(1) && physic_cap(2) && memory_cap(2) && issue_cap(2)

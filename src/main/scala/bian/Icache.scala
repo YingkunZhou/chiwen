@@ -22,7 +22,6 @@ class CoreIO(val data_width: Int) extends Bundle {
   val ready     = Output(Bool())
 }
 
-
 object Latch {
   def apply(in: Bool, wait: Bool, addition: Bool = true.B): Bool = {
     val in_latch = RegInit(false.B)

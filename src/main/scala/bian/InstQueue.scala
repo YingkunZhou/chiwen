@@ -112,10 +112,13 @@ class InstQueue extends Module with InstParam {
     /*the tail of queue*/
     def tail: UInt = count - 1.U
     /*issue forward enable vector*/
-    def forward: UInt = VecInit((0 until nEntry).map(i => !limit(i) &&
+    def forward: UInt = VecInit((0 until nEntry).map(i => limit(i) &&
       (snoop(i)(0) || speed(i)(0)) && (snoop(i)(1) || speed(i)(1)))).asUInt
     /*issue forward ptr of queue*/
-    def fwd_ptr: UInt = Mux((kill.survive & forward).orR, PriorityEncoder(forward), 0.U)
+    def fwd_ptr: UInt = Mux((kill.survive & forward).orR, PriorityEncoder(forward),
+      PriorityEncoder(limit.asUInt))
+    /*under limit constraint, exist such case that the queue has entry, but none can be issued*/
+    def fwd_val: Bool = (kill.survive & limit.asUInt).orR
   })
 
   val inst_count = RegInit(0.U(wCount.W))
@@ -187,7 +190,7 @@ class InstQueue extends Module with InstParam {
     when (inst_ctrl.issue_stall) {
       for (i <- 0 until 2) issue.rs(i).valid := inst_ctrl.issue_valid(i)
     }.elsewhen (inst_ctrl.count =/= 0.U) {
-      issue.valid := true.B
+      issue.valid := inst_ctrl.fwd_val
       issue.entry := inst_queue(inst_ctrl.fwd_ptr)
       for (i <- 0 until 2) {
         issue.rs(i).valid := inst_ctrl.snoop(inst_ctrl.fwd_ptr)(i)
@@ -217,8 +220,8 @@ class InstQueue extends Module with InstParam {
   def touch_count : Seq[Bool] = (0 until nEntry).map(i => i.U === inst_count(wEntry-1,0))
   for (i <- 0 until nEntry) {
     //only for load & store inst
-    inst_ctrl.limit(i) := io.issueable.valid && inst_queue(i).mem_en &&
-      CmpId(io.issueable.bits, inst_queue(i).id, io.head)
+    inst_ctrl.limit(i) := !io.issueable.valid || !inst_queue(i).mem_en ||
+      !CmpId(io.issueable.bits, inst_queue(i).id, io.head)
     for (j <- 0 until 2) {
       inst_ctrl.snoop(i)(j) := issue.snoop(i)(j).valid ||
         io.bypass.map(b => b.addr === issue.snoop(i)(j).addr && b.valid).reduce(_||_)

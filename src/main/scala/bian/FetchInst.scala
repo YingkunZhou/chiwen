@@ -17,8 +17,8 @@ class FetchInst(implicit conf: CPUConfig) extends Module with BTBParams {
     val cyc = Input(UInt(conf.xprlen.W))
     val mem = new AxiIO(conf.xprlen)
 
-    val if_btb     = Input(Vec(2, new Predict(conf.xprlen)))
-    val dec_btb    = Output(Vec(2, new Predict(conf.xprlen)))
+    val if_btb     = Input(Vec(2, Valid(new Predict(conf.xprlen))))
+    val dec_btb    = Output(Vec(2, Valid(new Predict(conf.xprlen))))
     val pc         = Input(UInt(conf.data_width.W))
     val pc_split   = Input(Bool())
     val pc_forward = Output(Bool())
@@ -116,12 +116,15 @@ class FetchInst(implicit conf: CPUConfig) extends Module with BTBParams {
 
   /*=======================dec part==============================*/
   val reg_pc   = Reg(Vec(2, UInt(conf.data_width.W)))
-  val reg_pred = Reg(Vec(2, new Predict(conf.xprlen)))
+  val reg_pred = Reg(Vec(2, Valid(new Predict(conf.xprlen))))
   when (pc_valid) {
     inst_odd   :=  pc_odd(0)
     inst_split := !pc_odd(0) && io.pc_split
     for (i <- 0 until conf.nInst) {
-      when (!pc_odd(i)) { reg_pc(i) := Cat(io.pc(conf.xprlen-1, conf.pcLSB+1), i.U(1.W), 0.U(conf.pcLSB.W)); reg_pred(i) := io.if_btb(i) }
+      when (!pc_odd(i)) {
+        reg_pc(i) := Cat(io.pc(conf.xprlen-1, conf.pcLSB+1), i.U(1.W), 0.U(conf.pcLSB.W))
+        reg_pred(i) := io.if_btb(i)
+      }
     }
   }
   val inst = Wire(Vec(2, UInt(conf.xprlen.W)))

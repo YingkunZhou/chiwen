@@ -29,6 +29,7 @@ class FrontIO(implicit conf: CPUConfig) extends Bundle {
   val inst = Vec(conf.nInst, Flipped(ValidIO(UInt(conf.inst_width.W))))
   val pred = Input(new PredictInfo(conf.data_width))
   val pc_split = Input(Bool())
+  val inst_split = Input(Bool())
 }
 
 class FrontQueue(implicit val conf: CPUConfig) extends Module with FrontParam {
@@ -48,20 +49,24 @@ class FrontQueue(implicit val conf: CPUConfig) extends Module with FrontParam {
       val valid = Bool()
       val pc = UInt(conf.data_width.W)
       val ptr = Vec(2, UInt((wEntry+1).W))
-      val inst_split = Vec(nEntry, Bool())
-      val pc_split   = Vec(nEntry, Bool())
-      def next(i: Int): UInt = RingQNext(ptr(i), nEntry)
+      def next_ptr(i: Int): UInt = RingQNext(ptr(i), nEntry)
+      val cancel = Vec(nEntry, Bool()) /*rename stage cancel*/
+      def Cancel: Bool = cancel(next_ptr(H)(wEntry-1,0))
+      val inst_split = Vec(nEntry, Bool()) /*dec stage split cancle*/
+      def split_inst(i: Bool): Bool = Mux(nEmpty, inst_split(ptr(H)(wEntry-1,0)), i)
+      val pc_split   = Vec(nEntry, Bool()) /*pc can be split rather than even and then odd*/
+      def split_pc: Bool = pc_split(ptr(H)(wEntry-1,0)) && nEmpty
+
       def empty: Bool  = ptr(H) === ptr(T)
       def nEmpty: Bool = ptr(H) =/= ptr(T)
-      def split_pc: Bool = pc_split(ptr(H)(wEntry-1,0)) && nEmpty
-      def split: Bool = inst_split(next(H)(wEntry-1,0))
-      def pc_split_input(i: Bool): Unit = {pc_split(ptr(T)(wEntry-1,0)) := i}
-      def split_input(i: Bool): Unit = {inst_split(ptr(T)(wEntry-1,0)) := i}
+      def cancel_i(i: Bool): Unit = {cancel(ptr(T)(wEntry-1,0)) := i}
+      def inst_split_i(i : Bool): Unit = {inst_split(ptr(T)(wEntry-1,0)) := i}
+      def pc_split_i(i: Bool): Unit = {pc_split(ptr(T)(wEntry-1,0)) := i}
     })
     w.valid := false.B
     w.pc  := START_ADDR
     w.ptr := Seq.fill(2)(0.U((wEntry+1).W))
-    w.inst_split := DontCare
+    w.cancel := DontCare
     w.pc_split   := DontCare
     w
   })
@@ -97,8 +102,11 @@ class FrontQueue(implicit val conf: CPUConfig) extends Module with FrontParam {
   io.forward := RingNfull(inst_ptr, wEntry)
   for (i <- 0 until conf.nInst) {
     io.inst(i).bits := inst(i)
-    io.inst(i).valid := inst_valid(i)
   }
+  io.inst(0).valid := inst_valid(0)
+  io.inst(1).valid := inst_valid(1) &&
+    !(inst_valid(0) && pred_ctrl.split_inst(io.in.inst_split))
+
   inst_inc(H) := inst_ready && queue_valid
   inst_inc(T) := input_valid && io.forward && (!inst_ready || queue_valid)
   when(inst_inc(T)) {
@@ -114,7 +122,7 @@ class FrontQueue(implicit val conf: CPUConfig) extends Module with FrontParam {
   }.elsewhen(inst_ready) {
     when (queue_valid) {
       inst_valid(0) := head_valid(0)
-      inst_valid(1) := head_valid(1) && !pred_ctrl.split
+      inst_valid(1) := head_valid(1) && !pred_ctrl.Cancel
     }.elsewhen(input_valid) {
       for (i <- 0 until conf.nInst)
       inst_valid(i) := io.in.inst(i).valid
@@ -155,8 +163,9 @@ class FrontQueue(implicit val conf: CPUConfig) extends Module with FrontParam {
   pred_inc(T) := pred_ctrl.valid && RingNfull(pred_ctrl.ptr, wEntry) && (!inst_ready || pred_ctrl.nEmpty)
   when(pred_inc(T)) {
     predQueue(pred_ctrl.ptr(T)(wEntry-1,0)) := io.in.pred
-    pred_ctrl.split_input(io.in.pred.split)
-    pred_ctrl.pc_split_input(io.in.pc_split && !io.in.pred.split)
+    pred_ctrl.cancel_i(io.in.pred.split)
+    pred_ctrl.inst_split_i(io.in.inst_split)
+    pred_ctrl.pc_split_i(io.in.pc_split && !io.in.pred.split)
   }
 
   when(flush) {
@@ -170,10 +179,10 @@ class FrontQueue(implicit val conf: CPUConfig) extends Module with FrontParam {
   when(flush) {
     pred_ctrl.ptr(T) := pred_ctrl.ptr(H)
   }.elsewhen (pred_inc(T)) {
-    pred_ctrl.ptr(T) := pred_ctrl.next(T)
+    pred_ctrl.ptr(T) := pred_ctrl.next_ptr(T)
   }
   when(!flush && pred_inc(H)) {
-    pred_ctrl.ptr(H) := pred_ctrl.next(H)
+    pred_ctrl.ptr(H) := pred_ctrl.next_ptr(H)
   }
 
   io.pred.redirect := Mux(pred_ctrl.nEmpty, head_pred.redirect, io.in.pred.redirect)

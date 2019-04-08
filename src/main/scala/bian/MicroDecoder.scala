@@ -11,16 +11,16 @@ object Jump {
 
 class MicroDecoder(inst_width: Int) extends Module{
   val io = IO(new Bundle{
-    val inst = Input(UInt(inst_width.W))
 //    val jump = Output(UInt(Jump.NUM.W))
+    val inst = Input(UInt(inst_width.W))
+    //single
     val isjal = Output(Bool())
     val isjalr = Output(Bool())
-    val isbrnch = Output(Bool())
-
-    val is_bj = Output(Bool())
+    val branch = Output(Bool())
+    //combination
     val brchjr = Output(Bool())
     val brchj  = Output(Bool())
-    val privil = Output(Bool())
+    val is_bj = Output(Bool())
   })
 
   val func  = io.inst(6,2)
@@ -35,13 +35,12 @@ class MicroDecoder(inst_width: Int) extends Module{
   val arith = func === "b01100".U
   val fence = func === "b00011".U
   val csrr  = func === "b11100".U
-  io.isjal := jal
+  io.isjal  := jal
   io.isjalr := jalr
-  io.isbrnch := brnch
-  io.is_bj  := jal || jalr || brnch
+  io.branch := brnch
   io.brchjr := jalr || brnch
-  io.brchj  := jal || brnch
-  io.privil := fence || csrr
+  io.brchj  := jal  || brnch
+  io.is_bj  := jal  || jalr || brnch
 //  def link(addr: UInt): Bool = addr === 1.U || addr === 5.U
   /*
   * A JAL instruction should push the return address onto

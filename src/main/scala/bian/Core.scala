@@ -7,16 +7,16 @@ import common.{AxiIO, CPUConfig, MemPortIo}
 class InterfaceIO(val data_width: Int) extends Bundle {
   val xcpt     = Input(new Valid(UInt(data_width.W)))
   val kill     = Input(Bool())
-
   val forward  = Input(Vec(2, Bool()))
-
-  val pc    = Output(Vec(2, UInt(data_width.W)))
-  val inst  = Output(Vec(2, Valid(UInt(data_width.W))))
-  val pred  = Output(new PredictInfo(data_width))
+  //dec stage
+  val inst     = Output(Vec(2, Valid(UInt(data_width.W))))
+  //rename stage
+  val pred     = Output(new PredictInfo(data_width))
   val pc_split = Output(Bool())
+  val inst_split = Output(Bool())
 
-  val fb_pc   = Input(UInt(data_width.W))
-  val fb_type = Input(UInt(BTBType.SZ.W))
+  val fb_pc    = Input(UInt(data_width.W))
+  val fb_type  = Input(UInt(BTBType.SZ.W))
   val feedback = Input(Valid(new Predict(data_width)))
 }
 

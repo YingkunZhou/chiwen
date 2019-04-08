@@ -9,9 +9,8 @@ class FrontEnd(implicit conf: CPUConfig) extends Module with BTBParams {
     val mem      = new AxiIO(conf.xprlen)
     val back     = new InterfaceIO(conf.xprlen)
   })
-
+//  val ras      = Module(new RAS(nRAS)).io
   val btb      = Module(new BTB()).io
-  val ras      = Module(new RAS(nRAS)).io
   val fetchi   = Module(new FetchInst()).io
   val microDec = Array.fill(2)(Module(new MicroDecoder(conf.inst_width)).io)
   val dec_isbj = (0 until 2).map(i => fetchi.inst(i).valid && microDec(i).is_bj)
@@ -22,7 +21,7 @@ class FrontEnd(implicit conf: CPUConfig) extends Module with BTBParams {
   val if_reg_pc  = RegInit(START_ADDR)
   val if_next_pc =
         Mux(io.back.xcpt.valid, io.back.xcpt.bits,
-        Mux(io.back.kill,       io.back.feedBack.tgt,
+        Mux(io.back.kill,       io.back.feedBack.bits.tgt,
         Mux(dec_btb_error(0),   fetchi.dec_pc(1),
         Mux(dec_btb_error(1),   fetchi.dec_pc(1) + 4.U,
         Mux(btb.split,          btb.predict(0).tgt,
@@ -45,23 +44,21 @@ class FrontEnd(implicit conf: CPUConfig) extends Module with BTBParams {
 
   for (i <- 0 until conf.nInst) {
     microDec(i).inst  := fetchi.inst(i).bits
-    io.back.bj_sel(i) := microDec(i).is_bj
     dec_btb_error(i)  := Pulse(fetchi.inst(i).valid && !microDec(i).is_bj && fetchi.dec_btb(i).redirect, io.back.forward(i))
   }
 
+  io.back.bj_sel   := microDec.map(_.is_bj)
   io.back.branch   := Mux(dec_isbj(0), microDec(0).isbrnch, microDec(1).isbrnch)
-  io.back.jump     := Mux(dec_isbj(0), microDec(0).jump, microDec(1).jump)
   io.back.pred.tgt := Mux(dec_isbj(0), fetchi.dec_btb(0).tgt, fetchi.dec_btb(1).tgt)
-  io.back.pred.typ := Mux(dec_isbj(0), fetchi.dec_btb(0).typ, fetchi.dec_btb(1).typ)
-  io.back.pred.you := Mux(dec_isbj(0), fetchi.dec_btb(0).you, fetchi.dec_btb(1).you)
-  io.back.pred.idx := Mux(dec_isbj(0), fetchi.dec_btb(0).idx, fetchi.dec_btb(1).idx)
   io.back.pred.redirect := DontCare
 
-  ras.pop := io.back.ras_pop
-  ras.push := io.back.ras_push
+//  io.back.jump := Mux(dec_isbj(0), microDec(0).jump, microDec(1).jump)
+//  ras.pop := io.back.ras_pop
+//  ras.push := io.back.ras_push
+//  btb.raspeek  := ras.peek
 
   btb.if_pc := if_reg_pc
   btb.fb_pc := io.back.fb_pc
-  btb.raspeek  := ras.peek
+  btb.fb_type := io.back.fb_type
   btb.feedBack := io.back.feedBack
 }
