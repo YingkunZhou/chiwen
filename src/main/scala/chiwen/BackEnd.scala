@@ -274,11 +274,11 @@ class BackEnd(implicit conf: CPUConfig) extends Module with BTBParams {
   io.front.xcpt.bits  := csr.io.evec
 
   // datapath to data memory outputs =============================
-  io.mem.req.valid     := mem_wire.mem_en && !ma_store && !ma_load
-  io.mem.req.bits.addr := mem_reg_exe_out
-  io.mem.req.bits.fcn  := mem.mem_fcn
-  io.mem.req.bits.typ  := mem.mem_typ
-  io.mem.req.bits.data := mem.rs2_data
+  io.mem.req.valid     := exe_wire.mem_en //&& !ma_store && !ma_load
+  io.mem.req.bits.addr := exe_wbdata
+  io.mem.req.bits.fcn  := exe.mem_fcn
+  io.mem.req.bits.typ  := exe.mem_typ
+  io.mem.req.bits.data := exe.rs2_data
   //===============================================================
 
   // WB Mux
