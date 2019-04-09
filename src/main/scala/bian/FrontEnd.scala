@@ -5,10 +5,11 @@ import chisel3.util.{Cat, Fill}
 import common.{AxiIO, CPUConfig}
 
 class PredictInfo(data_width: Int) extends Predict(data_width) {
-  val branch  = Bool()
   val brchjr  = Vec(2, Bool()) //determine pick which btb
   val rectify = Vec(2, Bool())
+  val branch  = Bool()
   val is_jal  = Bool()
+  def Brchjr(i: Int): Bool = brchjr(i) && !is_jal
   val split   = Bool() //mainly caused by jal
 }
 
@@ -127,14 +128,14 @@ class FrontEnd(implicit conf: CPUConfig) extends Module with BTBParams {
   rectify.miss  := rectify.tgt =/= pred_reg.tgt
   rectify.valid := (0 until 2).map(i => rectify_reg(i) && rectify.miss) //around 24 gates
 
-  io.back.pred.split    := rectify.valid(0)
   io.back.pred.tgt      := Mux(pred_reg.update, rectify.tgt, pred_reg.tgt)
   io.back.pred.redirect := pred_reg.redirect || rectify.valid(1)
   io.back.pred.rectify  := (0 until 2).map(i => pred_reg.rectify(i) || rectify.valid(i))
   io.back.pred.brchjr   := pred_reg.brchjr
   io.back.pred.branch   := pred_reg.branch
   io.back.pred.is_jal   := pred_reg.is_jal
-  io.back.pc_split      := pc_split_reg
+  io.back.pred.split    := rectify.valid(0)
   io.back.inst_split    := pred_reg.inst_split
+  io.back.pc_split      := pc_split_reg
 
 }
