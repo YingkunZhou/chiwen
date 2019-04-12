@@ -72,7 +72,7 @@ class InstDecoder(implicit conf: CPUConfig) extends Module {
         SRL    -> List(Y, BR_N  , OP1_RS1, OP2_RS2   , OEN_1, OEN_1, ALU_SRL , WB_ALU, REN_1, MEN_0, M_X  , MT_X, CSR.N, N, N , CYC_1),
 
         JALR   -> List(Y, BR_N  , OP1_RS1, OP2_ITYPE , OEN_1, OEN_0, ALU_ADD , WB_PC4, REN_1, MEN_0, M_X  , MT_X, CSR.N, N, N , CYC_1),
-        JAL    -> List(Y, BR_N  , OP1_X  , OP2_X     , OEN_0, OEN_0, ALU_X   , WB_PC4, REN_1, MEN_0, M_X  , MT_X, CSR.N, N, N , CYC_1),
+        JAL    -> List(Y, BR_N  , OP1_PC , OP2_4     , OEN_0, OEN_0, ALU_ADD , WB_ALU, REN_1, MEN_0, M_X  , MT_X, CSR.N, N, N , CYC_1), //use some trick
         BEQ    -> List(Y, BR_EQ , OP1_RS1, OP2_RS2   , OEN_1, OEN_1, ALU_X   , WB_X  , REN_0, MEN_0, M_X  , MT_X, CSR.N, N, N , CYC_1),
         BNE    -> List(Y, BR_NE , OP1_RS1, OP2_RS2   , OEN_1, OEN_1, ALU_X   , WB_X  , REN_0, MEN_0, M_X  , MT_X, CSR.N, N, N , CYC_1),
         BGE    -> List(Y, BR_GE , OP1_RS1, OP2_RS2   , OEN_1, OEN_1, ALU_X   , WB_X  , REN_0, MEN_0, M_X  , MT_X, CSR.N, N, N , CYC_1),
@@ -132,7 +132,8 @@ class InstDecoder(implicit conf: CPUConfig) extends Module {
   val imm_stype  = Cat(io.inst(31,25), io.inst(11,7))
 
   // sign-extend immediates
-  io.imm    := Mux(op2_sel === OP2_STYPE, imm_stype, imm_itype)
+  // WARNING: please not change teh Mux order
+  io.imm    := Mux(op2_sel === OP2_STYPE, imm_stype, Mux(op2_sel === OP2_4, 4.U, imm_itype))
   io.imm7_0 := io.inst(19,12)
   io.imm_z  := Cat(Fill(27, 0.U(1.W)), io.inst(19,15))
 }

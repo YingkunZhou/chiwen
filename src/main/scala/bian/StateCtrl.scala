@@ -219,16 +219,23 @@ class StateCtrl extends Module with BackParam {
       )
     }
   }
-  when (CycRange(io.cyc, 671, 674)) {
+  when (CycRange(io.cyc, 260, 265)) {
     printf(
-      p"commit_31 ${reorder.commit(31)} " +
-      p"commit_0 ${reorder.commit(0)} " +
+//      p"commit_31 ${reorder.commit(31)} " +
+//      p"commit_0 ${reorder.commit(0)} " +
+      p"t1->${latest.maptb(6)} " +
+      p"using->${latest.useing(4)} " +
+      p"split->${io.split} " +
       p"tail ${reorder.tail(0)} " +
-      p"tail_val ${reorder.tail_val0}" +
+      p"tail_val ${reorder.tail_val0} " +
       p"id_ready0 ${io.id_ready} " +
+      p"bjr_val ${io.bjr_valid} " +
+      p"bidx1H ${io.bidx1H} " +
       p"kill_val ${io.kill.valid} " +
       p"kill_id ${io.kill.id} " +
-      p"head <val kill> ")
+      p"kill_idx ${io.kill.bidx} " +
+      p"head <val kill> " +
+      p"using4 ${latest.useing(4)} ")
     for (i <- 0 until nCommit) printf(
       p"${reorder.head(i)} <${reorder.head_val(i)} ${order_ctrl.kill(i)}> ")
     printf("\n")
@@ -337,7 +344,7 @@ class StateCtrl extends Module with BackParam {
         op     = io.logic(1).op
       )
       reorder.newphy(1, io.logic(1).rd.valid)
-      reorder.oldphy(1, (latest.rename(io.logic(1).rd.addr) && io.logic(1).rd.valid) || rename.wtAwt)
+      reorder.oldphy(1, (latest.rename(io.logic(1).rd.addr) || rename.wtAwt) && io.logic(1).rd.valid)
     }
   }
 

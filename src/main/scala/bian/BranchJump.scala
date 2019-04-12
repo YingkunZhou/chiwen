@@ -60,19 +60,6 @@ class BranchJump extends Module with BjParam {
   val br_type = Reg(Vec(nEntry, UInt(BR_N.getWidth.W)))
   val bj_table = Mem(nEntry, new BrjrEntry(data_width))
   val bj_queue = Reg(Vec(nEntry, new BrjrIssue(wOrder, wEntry)))
-  val bj_reg = RegInit({
-    val w = Wire(new Bundle{
-      val count    = UInt(wCount.W)
-      val fwd_kill = Bool()
-      val fwd_id   = UInt(wOrder.W)
-      val fwd_ptr  = UInt(wEntry.W)
-    })
-    w.count := 0.U
-    w.fwd_kill := DontCare
-    w.fwd_id   := DontCare
-    w.fwd_ptr  := DontCare
-    w
-  })
   val bj_ctrl = Wire(new Bundle {
     val head_id = UInt(wOrder.W) /*reorder buffer head id, the first inst*/
     val issue_id = Vec(3, UInt(wOrder.W)) /*input issue id in exe stage*/
@@ -124,30 +111,7 @@ class BranchJump extends Module with BjParam {
       (wire_actual ^ pop_entry.expect) && branch_acc)
     /*forward type*/
     def fwd_type: UInt = Mux(!pop_valid || pop_issue.branch, BTBType.branch.U, BTBType.jump.U)
-    /*insert moment alloced table idx and its one hot vector*/
-    def bidx: UInt  = Mux(forward, fwd_bidx , PriorityEncoder(empty))
-    def bid1H: UInt = Mux(forward, fwd_bid1H, PriorityEncoderOH(empty))
   })
-  io.in.ready         := bj_ctrl.empty.orR
-  io.bid1H            := bj_ctrl.bid1H
-  io.fb_pc            := bj_ctrl.pop_entry.pc
-  io.fb_type          := bj_ctrl.fwd_type
-  io.feedback.valid         := bj_ctrl.forward //is branch jump inst
-  io.feedback.bits.redirect := bj_ctrl.fwd_actual
-  io.feedback.bits.tgt      := bj_ctrl.fwd_tgt
-  io.kill.valid       := bj_ctrl.fwd_kill
-  io.kill.id          := bj_ctrl.fwd_id //FIXME: NOTICE: current branch jump inst not the next inst to begin killed
-  io.kill.bidx        := bj_ctrl.fwd_bidx
-  io.commit.valid     := bj_ctrl.pop_valid
-  io.commit.bits      := bj_ctrl.pop_issue.id
-  io.mask := (0 until 3).map(i => bj_ctrl.mask(i, io.issue(i).branch))
-  io.brtype := bj_ctrl.table_idcam.map(i => Mux1H(i, br_type))
-  io.cdlink := bj_ctrl.table_idcam.map(i => Mux1H(i, cd_link))
-
-  bj_reg.fwd_kill := bj_ctrl.fwd_kill
-  bj_reg.fwd_id   := bj_ctrl.fwd_id
-  bj_reg.fwd_ptr  := bj_ctrl.fwd_ptr
-
   bj_ctrl.head_id     := io.head
   bj_ctrl.issue_id    := io.issue.map(_.id)
   bj_ctrl.empty       := VecInit(bj_valid.map(!_.valid)).asUInt
@@ -164,10 +128,50 @@ class BranchJump extends Module with BjParam {
   bj_ctrl.push_entry.expect := io.in.bits.redirect
   bj_ctrl.push_entry.pc     := io.in.bits.pc
   bj_ctrl.push_entry.tgt    := io.in.bits.tgt
+  val bj_reg = RegInit({
+    val w = Wire(new Bundle{
+      val count    = UInt(wCount.W)
+      val forward  = Bool()
+      val fwd_kill = Bool()
+      val fwd_id   = UInt(wOrder.W)
+      val fwd_ptr  = UInt(wEntry.W)
+      val fwd_bidx = UInt(wEntry.W)
+    })
+    w.count := 0.U
+    w.forward  := DontCare
+    w.fwd_kill := DontCare
+    w.fwd_id   := DontCare
+    w.fwd_ptr  := DontCare
+    w.fwd_bidx := DontCare
+    w
+  })
+  bj_reg.forward  := bj_ctrl.forward
+  bj_reg.fwd_kill := bj_ctrl.fwd_kill
+  bj_reg.fwd_id   := bj_ctrl.fwd_id
+  bj_reg.fwd_ptr  := bj_ctrl.fwd_ptr
+  bj_reg.fwd_bidx := bj_ctrl.fwd_bidx
+
+  io.fb_pc            := bj_ctrl.pop_entry.pc
+  io.fb_type          := bj_ctrl.fwd_type
+  io.feedback.valid         := bj_ctrl.forward //is branch jump inst
+  io.feedback.bits.redirect := bj_ctrl.fwd_actual
+  io.feedback.bits.tgt      := bj_ctrl.fwd_tgt
+  io.kill.valid       := bj_ctrl.fwd_kill
+  io.kill.id          := bj_ctrl.fwd_id //FIXME: NOTICE: current branch jump inst not the next inst to begin killed
+  io.kill.bidx        := bj_ctrl.fwd_bidx
+  io.commit.valid     := bj_ctrl.pop_valid
+  io.commit.bits      := bj_ctrl.pop_issue.id
+  io.mask := (0 until 3).map(i => bj_ctrl.mask(i, io.issue(i).branch))
+  io.brtype := bj_ctrl.table_idcam.map(i => Mux1H(i, br_type))
+  io.cdlink := bj_ctrl.table_idcam.map(i => Mux1H(i, cd_link))
+
+  io.in.ready         := bj_ctrl.empty.orR || bj_reg.forward
+  io.bid1H            := Mux(bj_reg.forward, UIntToOH(bj_reg.fwd_bidx),PriorityEncoderOH(bj_ctrl.empty))
+  val bidx = Mux(bj_reg.forward, bj_reg.fwd_bidx, PriorityEncoder(bj_ctrl.empty))
   when (io.in.valid) {
-    bj_table(bj_ctrl.bidx) := bj_ctrl.push_entry
-    cd_link(bj_ctrl.bidx)  := io.in.bits.cont
-    br_type(bj_ctrl.bidx)  := io.in.bits.brtype
+    bj_table(bidx) := bj_ctrl.push_entry
+    cd_link(bidx)  := io.in.bits.cont
+    br_type(bidx)  := io.in.bits.brtype
   }
 
 
@@ -176,11 +180,11 @@ class BranchJump extends Module with BjParam {
   for (i <- 0 until nEntry) {
     when (io.xcpt || bj_ctrl.table_kill(i)) {
       bj_valid(i).valid := false.B
-    }.elsewhen (bj_ctrl.bid1H(i)) {
+    }.elsewhen (io.bid1H(i)) {
       when (io.in.valid) {
         bj_valid(i).valid := true.B
         bj_valid(i).bits := io.in.bits.id
-      }.elsewhen(bj_ctrl.forward) {
+      }.elsewhen(bj_reg.forward) {
         bj_valid(i).valid := false.B
       }
     }
@@ -202,7 +206,7 @@ class BranchJump extends Module with BjParam {
   }
   def pushQueue(i: Int): Unit = {
     bj_queue(i).id     := io.in.bits.id
-    bj_queue(i).bidx   := bj_ctrl.bidx
+    bj_queue(i).bidx   := bidx
     bj_queue(i).branch := io.in.bits.branch
     bj_queue(i).valid  := false.B
   }
@@ -250,15 +254,15 @@ class BranchJump extends Module with BjParam {
     }
   }
 
-  when (CycRange(io.cyc, 469, 479)) {
-//    for (i <- 0 until 3) {
-//      printf(
-//        p"issue valid ${io.issue(i).valid} " +
-//          p"branch ${io.issue(i).branch} " +
-//          p"actual ${io.issue(i).actual} " +
-//          p"brtype ${io.brtype(i)} " +
-//          p"hit ${bj_ctrl.valid(i)}\n")
-//    }
+  when (CycRange(io.cyc, 260, 265)) {
+    for (i <- 0 until 3) {
+      printf(
+        p"issue valid ${io.issue(i).valid} " +
+          p"branch ${io.issue(i).branch} " +
+          p"actual ${io.issue(i).actual} " +
+          p"brtype ${io.brtype(i)} " +
+          p"hit ${bj_ctrl.valid(i)}\n")
+    }
 //    printf(p"output: " +
 //      p"ready->${io.in.ready} " +
 //      p"bid1H->${io.bid1H} " +
@@ -275,10 +279,10 @@ class BranchJump extends Module with BjParam {
 //      p"commit_val->${io.commit.valid} " +
 //      p"commit_id->${io.commit.bits}\n")
 //
-//    printf(p"output: mask->Vec(${io.mask(0)}, ${io.mask(1)}, ${io.mask(2)}) " +
-////      p"br_type->Vec(${io.brtype(0)}, ${io.brtype(1)}, ${io.brtype(2)}) " +
-////      p"cd_link->Vec(${io.cdlink(0)}, ${io.cdlink(1)}, ${io.cdlink(2)})" +
-//      p"\n")
+    printf(p"output: mask->Vec(${io.mask(0)}, ${io.mask(1)}, ${io.mask(2)}) " +
+//      p"br_type->Vec(${io.brtype(0)}, ${io.brtype(1)}, ${io.brtype(2)}) " +
+      p"cd_link->${io.cdlink(0)}" +
+      p"\n")
 //    printf(p"bj_ctrl: update->${bj_ctrl.update} actual->${bj_ctrl.actual} forward->${bj_ctrl.forward} tail->${bj_ctrl.tail} " +
 //      p"fwd_ptr->${bj_ctrl.fwd_ptr} fwd_kill->${bj_ctrl.fwd_kill}\n")
     val queue_id     = Wire(Vec(nEntry, UInt()))

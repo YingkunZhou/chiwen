@@ -48,7 +48,7 @@ trait ScalarOpConstants {
   val OP2_ITYPE  = 2.U(3.W) // immediate, I-type
   val OP2_UTYPE  = 3.U(3.W) // immediate, U-type
   val OP2_STYPE  = 5.U(3.W) // immediate, S-type
-
+  val OP2_4      = 6.U(3.W)
   // Register Operand Output Enable Signal
   val OEN_0   = false.B
   val OEN_1   = true.B
