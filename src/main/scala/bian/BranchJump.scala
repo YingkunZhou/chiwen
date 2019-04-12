@@ -79,13 +79,14 @@ class BranchJump extends Module with BjParam {
     val tail = UInt(wCount.W) /*the last one position of queue*/
     val actual = Vec(nEntry, Bool()) /*the update actual bit*/
     val update = Vec(nEntry, Bool()) /*queue update vector signal*/
-    val table_kill = Vec(nEntry, Bool()) /*table kill vector*/
+    val tbkill = Vec(nEntry, Bool()) /*table kill vector*/
+    val tb_idx = UInt(wEntry.W)
     /*issue valid mask signal, is sequence logic not comb logic, need to push to queue first*/
     def mask(i: Int, is_branch: Bool): Bool = valid(i) && (!order(i) || pop_valid || !is_branch)
 
-    def cmp01: Bool = CmpId(issue_id(0), issue_id(1), head_id) && branch(0) || !branch(1)
-    def cmp02: Bool = CmpId(issue_id(0), issue_id(2), head_id) && branch(0) || !branch(2)
-    def cmp12: Bool = CmpId(issue_id(1), issue_id(2), head_id) && branch(1) || !branch(2)
+    def cmp01: Bool = CmpId(issue_id(0), issue_id(1), head_id, wOrder-1) && branch(0) || !branch(1)
+    def cmp02: Bool = CmpId(issue_id(0), issue_id(2), head_id, wOrder-1) && branch(0) || !branch(2)
+    def cmp12: Bool = CmpId(issue_id(1), issue_id(2), head_id, wOrder-1) && branch(1) || !branch(2)
     def order: Seq[Bool] = Seq(cmp01 && cmp02, !cmp01 && cmp12, !cmp02 && !cmp12) /*branch order*/
 
     val pop_entry  = new BrjrEntry(data_width) /*pop entry out of the table*/
@@ -167,18 +168,18 @@ class BranchJump extends Module with BjParam {
 
   io.in.ready         := bj_ctrl.empty.orR || bj_reg.forward
   io.bid1H            := Mux(bj_reg.forward, UIntToOH(bj_reg.fwd_bidx),PriorityEncoderOH(bj_ctrl.empty))
-  val bidx = Mux(bj_reg.forward, bj_reg.fwd_bidx, PriorityEncoder(bj_ctrl.empty))
+
+  bj_ctrl.tb_idx := Mux(bj_reg.forward, bj_reg.fwd_bidx, PriorityEncoder(bj_ctrl.empty))
   when (io.in.valid) {
-    bj_table(bidx) := bj_ctrl.push_entry
-    cd_link(bidx)  := io.in.bits.cont
-    br_type(bidx)  := io.in.bits.brtype
+    bj_table(bj_ctrl.tb_idx) := bj_ctrl.push_entry
+    cd_link(bj_ctrl.tb_idx)  := io.in.bits.cont
+    br_type(bj_ctrl.tb_idx)  := io.in.bits.brtype
   }
 
-
-  bj_ctrl.table_kill := bj_valid.map(t => bj_reg.fwd_kill &&
-    CmpId(bj_reg.fwd_id, t.bits, bj_ctrl.head_id))
+  bj_ctrl.tbkill := bj_valid.map(t => bj_reg.fwd_kill &&
+    CmpId(bj_reg.fwd_id, t.bits, bj_ctrl.head_id, wOrder-1))
   for (i <- 0 until nEntry) {
-    when (io.xcpt || bj_ctrl.table_kill(i)) {
+    when (io.xcpt || bj_ctrl.tbkill(i)) {
       bj_valid(i).valid := false.B
     }.elsewhen (io.bid1H(i)) {
       when (io.in.valid) {
@@ -206,7 +207,7 @@ class BranchJump extends Module with BjParam {
   }
   def pushQueue(i: Int): Unit = {
     bj_queue(i).id     := io.in.bits.id
-    bj_queue(i).bidx   := bidx
+    bj_queue(i).bidx   := bj_ctrl.tb_idx
     bj_queue(i).branch := io.in.bits.branch
     bj_queue(i).valid  := false.B
   }
@@ -254,15 +255,15 @@ class BranchJump extends Module with BjParam {
     }
   }
 
-  when (CycRange(io.cyc, 260, 265)) {
-    for (i <- 0 until 3) {
-      printf(
-        p"issue valid ${io.issue(i).valid} " +
-          p"branch ${io.issue(i).branch} " +
-          p"actual ${io.issue(i).actual} " +
-          p"brtype ${io.brtype(i)} " +
-          p"hit ${bj_ctrl.valid(i)}\n")
-    }
+  when (CycRange(io.cyc, 122, 127)) {
+//    for (i <- 0 until 3) {
+//      printf(
+//        p"issue valid ${io.issue(i).valid} " +
+//          p"branch ${io.issue(i).branch} " +
+//          p"actual ${io.issue(i).actual} " +
+//          p"brtype ${io.brtype(i)} " +
+//          p"hit ${bj_ctrl.valid(i)}\n")
+//    }
 //    printf(p"output: " +
 //      p"ready->${io.in.ready} " +
 //      p"bid1H->${io.bid1H} " +

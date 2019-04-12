@@ -162,7 +162,7 @@ class IssueQueue(val nEntry: Int) extends Module with BackParam {
   issue_ctrl.tidx     := Mux(issue.forward, issue.entry.tidx, PriorityEncoder(issue_ctrl.empty))
   issue_ctrl.tidx1H   := Mux(issue.forward, UIntToOH(issue.entry.tidx), PriorityEncoderOH(issue_ctrl.empty))
   issue_ctrl.tb_valid := VecInit(issue_valid.map(_.valid)).asUInt &
-    VecInit(issue_valid.map(i => !io.kill.valid || !CmpId(io.kill.bits, i.id, io.head))).asUInt
+    VecInit(issue_valid.map(i => !(io.kill.valid && CmpId(io.kill.bits, i.id, io.head, wOrder-1)))).asUInt
 
   issue_ctrl.lsacc := VecInit((0 until nEntry).map(i =>
     issue_ctrl.snoop(i)(0) && (issue.lsacc(i) ||
@@ -170,7 +170,7 @@ class IssueQueue(val nEntry: Int) extends Module with BackParam {
 
 //  (0 until nEntry).map(i => issue_ctrl.snoop(i)(0) && (issue_ctrl.snoop(i)(1) || issue.lsacc(i)))
 
-  issue_ctrl.kill.cmp   := issue_queue.map(i => CmpId(io.kill.bits, i.id, io.head))
+  issue_ctrl.kill.cmp   := issue_queue.map(i => CmpId(io.kill.bits, i.id, io.head, wOrder-1))
   issue_ctrl.kill.kill  := io.kill.valid
   issue_ctrl.kill.valid := queue_valid.asUInt
   issue_ctrl.count := Mux(issue_ctrl.kill.use_ptr, issue_ctrl.kill.ptr, issue.count)

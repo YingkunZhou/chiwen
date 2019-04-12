@@ -142,7 +142,7 @@ class BackEnd(implicit conf: CPUConfig) extends Module with BackParam {
   stateCtrl.commit := commit
   for (i <- 0 until nCommit) {
     commit_keep(i) := !branchJump.kill.valid ||
-      CmpId(commit(i).id, branchJump.kill.id, stateCtrl.head) //commit id <= branch kill id
+      CmpId(commit(i).id, branchJump.kill.id, stateCtrl.head, wOrder-1) //commit id <= branch kill id
     stateCtrl.commit(i).valid := commit(i).valid && commit_keep(i)
   }
 
@@ -276,7 +276,7 @@ class BackEnd(implicit conf: CPUConfig) extends Module with BackParam {
 
   stateCtrl.st_commit.bits := loadStore.stcommit.bits
   stateCtrl.st_commit.valid := loadStore.stcommit.valid && (!branchJump.kill.valid ||
-    CmpId(loadStore.stcommit.bits, branchJump.kill.id, stateCtrl.head))
+    CmpId(loadStore.stcommit.bits, branchJump.kill.id, stateCtrl.head, wOrder-1))
 
   io.mem <> loadStore.mem
   for (i <- 0 until nInst) {
@@ -324,8 +324,8 @@ class BackEnd(implicit conf: CPUConfig) extends Module with BackParam {
         (Fill(data_width, exe_reg_d_sel(i)(j)(IMM)) & exe_reg_issue(i).info.data(j)) |
         (Fill(data_width, exe_reg_d_sel(i)(j)(REG)) & exe_rs_data(i)(j))
     }
-    exe_inst_val(i) := exe_reg_issue(i).valid && (!inner_kill.valid ||
-      CmpId(exe_reg_issue(i).id, inner_kill.id, stateCtrl.head))
+    exe_inst_val(i) := exe_reg_issue(i).valid && !(inner_kill.valid &&
+      CmpId(inner_kill.id, exe_reg_issue(i).id, stateCtrl.head, wOrder-1))
 
     exe_alu_data(i) := (exe_reg_issue(i).info.data(1) &
        Fill(data_width, exe_reg_d_sel(i)(1)(IMM) || exe_reg_issue(i).mem_en)) |
@@ -414,7 +414,7 @@ class BackEnd(implicit conf: CPUConfig) extends Module with BackParam {
   wb_data(LOAD) := loadStore.wb_data
   data_wb(LOAD) := loadStore.ldcommit.wb
 
-  val issue_cmp   = CmpId(exe_reg_issue(0).id, exe_reg_issue(1).id, stateCtrl.head)
+  val issue_cmp   = CmpId(exe_reg_issue(0).id, exe_reg_issue(1).id, stateCtrl.head, wOrder-1)
   val self_ready  = Wire(Vec(nInst, Bool()))
   val self_accept = Wire(Vec(nInst, Bool()))
   val ALU3_ready = Wire(Vec(nInst, Bool()))
@@ -423,7 +423,7 @@ class BackEnd(implicit conf: CPUConfig) extends Module with BackParam {
   ALU3_ready(1) := (!issue_cmp || self_accept(0))
   for (i <- 0 until nInst) {
     ALU3_valid(i) := (issueQueue(ALU3).tail.valid ||
-      CmpId(issueQueue(ALU3).tail.id, exe_reg_issue(i).id, stateCtrl.head))
+      CmpId(issueQueue(ALU3).tail.id, exe_reg_issue(i).id, stateCtrl.head, wOrder-1))
 
     instQueue(i).issue.ready := self_accept(i) ||
       (ALU3_ready(i) && ALU3_valid(i) && issueQueue(ALU3).tail.ready)
@@ -454,7 +454,7 @@ class BackEnd(implicit conf: CPUConfig) extends Module with BackParam {
     issueQueue(i).in.bits.data_sel  := exe_reg_issue(i).rs.map(rs =>
       VecInit(data_wb.map(b => b.addr === rs.addr && b.valid)).asUInt) //change data sel
     issueQueue(i).in.bits.valid     := issueQueue(i).tail.valid ||
-      CmpId(issueQueue(i).tail.id, exe_reg_issue(i).id, stateCtrl.head) //change valid
+      CmpId(issueQueue(i).tail.id, exe_reg_issue(i).id, stateCtrl.head, wOrder-1) //change valid
 
     self_ready(i)   := (0 until 2).map(j => exe_reg_issue(i).rs(j).valid).reduce(_&&_)
     self_accept(i)  := !issueQueue(i).in.valid || issueQueue(i).in.ready
@@ -504,8 +504,12 @@ class BackEnd(implicit conf: CPUConfig) extends Module with BackParam {
       Mux(instQueue(i).in.valid, frontQueue.inst(i).bits, BUBBLE))
   }
 
-  when (CycRange(io.cyc, 671, 674)) {
-    printf(p"${branch_cap(0)} && ${physic_cap(0)} && ${memory_cap(0)} && ${issue_cap(0)}\n")
+  when (CycRange(io.cyc, 34, 34)) {
+    printf(p"${branch_cap(0)} && " +
+      p"${physic_cap(0)} && " +
+      p"${memory_cap(0)} && " +
+      p"${issue_cap(0)} && " +
+      p"${privil_cap(0)}\n")
 //    printf(
 //      p"issueQ: Cyc= ${io.cyc} inner kill valid ${inner_kill.valid}\n" +
 //      p"Input valid ${exe_inst_val(0)} " +

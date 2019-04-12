@@ -228,7 +228,7 @@ class LoadStore extends Module with LsParam {
   val queue_ctrl = Wire(new LSQCtrl(nEntry))
   queue_ctrl.nxt_head := queue.head.map(_+2.U)
   queue_ctrl.nxt_tail := queue.tail.map(_+2.U)
-  queue_ctrl.kill.const := VecInit(queue.entry.map(q => CmpId(io.kill.bits, q.id, io.head))).asUInt
+  queue_ctrl.kill.const := VecInit(queue.entry.map(q => CmpId(io.kill.bits, q.id, io.head, wOrder-1))).asUInt
   queue_ctrl.kill_ptr := queue_ctrl.kill.ptr(
     continue = queue.conti, head = queue.head(0)(wEntry),
     above = queue.above, below = queue.below)
@@ -270,7 +270,7 @@ class LoadStore extends Module with LsParam {
   load_ctrl.capty_gt(0) := load_queue.tail_val0 || load_ctrl.inc_head
   load_ctrl.capty_gt(1) := load_queue.tail_val1 || (load_queue.tail_val0 && load_ctrl.inc_head)
   load_ctrl.nxt_tail := load_queue.tail.map(next(_, nLoad, 2))
-  load_ctrl.kill.const := VecInit(load_queue.ls_id.map(CmpId(io.kill.bits, _, io.head))).asUInt
+  load_ctrl.kill.const := VecInit(load_queue.ls_id.map(CmpId(io.kill.bits, _, io.head, wOrder-1))).asUInt
   load_ctrl.kill_ptr := load_ctrl.kill.ptr(
     continue = load_queue.conti, head = load_queue.head(wLoad),
     above = load_queue.above, below = load_queue.below)
@@ -315,7 +315,7 @@ class LoadStore extends Module with LsParam {
   val store_ctrl = Wire(new StQCtrl(nStore))
   store_ctrl.nxt_head := next(store_queue.head, nStore, 1)
   store_ctrl.nxt_tail := store_queue.tail.map(next(_, nStore, 2))
-  store_ctrl.kill.const := VecInit(store_queue.ls_id.map(CmpId(io.kill.bits, _, io.head))).asUInt
+  store_ctrl.kill.const := VecInit(store_queue.ls_id.map(CmpId(io.kill.bits, _, io.head, wOrder-1))).asUInt
   store_ctrl.kill_ptr := store_ctrl.kill.ptr(
     continue = store_queue.conti, head = store_queue.head(wStore),
     above = store_queue.above, below = store_queue.below)
@@ -501,7 +501,7 @@ class LoadStore extends Module with LsParam {
   })
 
   mem.fwd_fcn := Mux(!load_queue.ls_valid || (store_queue.ls_valid
-    && CmpId(store_queue.id, load_queue.id, io.head)), M_XWR, M_XRD)
+    && CmpId(store_queue.id, load_queue.id, io.head, wOrder-1)), M_XWR, M_XRD)
   mem.fwd_addr  := Mux(mem.fwd_stall, mem_reg.ld_addr(data_width-1,2), load_queue.addr(data_width-1,2))
   mem.fwd_ptr   := Mux(mem.fwd_stall, mem_reg.stq_ptr, load_queue.stq_ptr)
   mem.fwd_conti := mem.fwd_ptr(wStore) === store_queue.head(wStore)

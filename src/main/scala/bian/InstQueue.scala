@@ -107,6 +107,7 @@ class InstQueue extends Module with InstParam {
     val tbkill = Vec(nTable, Bool()) /*table kill vector*/
     val tidx   = UInt(log2Ceil(nTable).W) /*input alloc table index*/
     val tidx1H = UInt(nTable.W) /*issue table index one hot vector*/
+    val enter_tb = Bool() /*whether in info enter into table or not*/
     // for queue
     val count = UInt(wCount.W)
     val snoop = Vec(nEntry, Vec(2, Bool())) /*snoop bypass info*/
@@ -157,13 +158,13 @@ class InstQueue extends Module with InstParam {
   inst_ctrl.empty  := VecInit(inst_valid.map(!_.valid)).asUInt
   inst_ctrl.tidx   := Mux(io.issue.fire, issue.entry.tidx, PriorityEncoder(inst_ctrl.empty))
   inst_ctrl.tidx1H := Mux(io.issue.fire, UIntToOH(issue.entry.tidx), PriorityEncoderOH(inst_ctrl.empty))
-  inst_ctrl.tbkill := inst_valid.map(i => CmpId(io.kill.bits, i.id, io.head))
+  inst_ctrl.tbkill := inst_valid.map(i => CmpId(io.kill.bits, i.id, io.head, wOrder-1))
 
-  inst_ctrl.issue_kill  := io.kill.valid && CmpId(io.kill.bits, issue.entry.id, io.head)
+  inst_ctrl.issue_kill  := io.kill.valid && CmpId(io.kill.bits, issue.entry.id, io.head, wOrder-1)
   inst_ctrl.issue_stall := !io.issue.ready && !inst_ctrl.issue_kill
   inst_ctrl.issue_valid := (0 until 2).map(i => io.issue.bits.data_sel(i).orR || issue.rs(i).valid)
 
-  inst_ctrl.kill.cmp   := inst_queue.map(i => CmpId(io.kill.bits, i.id, io.head))
+  inst_ctrl.kill.cmp   := inst_queue.map(i => CmpId(io.kill.bits, i.id, io.head, wOrder-1))
   inst_ctrl.kill.kill  := io.kill.valid
   inst_ctrl.kill.valid := queue_valid.asUInt
 
@@ -222,10 +223,11 @@ class InstQueue extends Module with InstParam {
   def shift_queue : Seq[Bool] = (0 until nEntry).map(i => i.U  <  inst_ctrl.tail(wEntry-1,0))
   def touch_tail  : Seq[Bool] = (0 until nEntry).map(i => i.U === inst_ctrl.tail(wEntry-1,0))
   def touch_count : Seq[Bool] = (0 until nEntry).map(i => i.U === inst_count(wEntry-1,0))
+  inst_ctrl.enter_tb := !io.issue.ready || issue.valid
   for (i <- 0 until nEntry) {
     //only for load & store inst
     inst_ctrl.limit(i) := !io.issueable.valid || !inst_queue(i).mem_en ||
-      !CmpId(io.issueable.bits, inst_queue(i).id, io.head)
+      !CmpId(io.issueable.bits, inst_queue(i).id, io.head, wOrder-1)
     for (j <- 0 until 2) {
       inst_ctrl.snoop(i)(j) := issue.snoop(i)(j).valid ||
         io.bypass.map(b => b.addr === issue.snoop(i)(j).addr && b.valid).reduce(_||_)
@@ -280,14 +282,14 @@ class InstQueue extends Module with InstParam {
     when (io.xcpt || (inst_ctrl.tbkill(i) && io.kill.valid)) {
       inst_valid(i).valid := false.B
     }.elsewhen(inst_ctrl.tidx1H(i)) {
-      when (io.in.valid && (!io.issue.ready || issue.valid)) {
+      when (io.in.valid && inst_ctrl.enter_tb) {
         inst_valid(i).valid := true.B
       }.elsewhen(io.issue.fire) {
         inst_valid(i).valid := false.B
       }
     }
     //inst table context
-    when (inst_ctrl.tidx1H(i) && io.in.valid && (!io.issue.ready || issue.valid)) {
+    when (inst_ctrl.tidx1H(i) && io.in.valid && inst_ctrl.enter_tb) {
       inst_valid(i).id := io.in.bits.id
       inst_table(i) := io.in.bits.info
     }

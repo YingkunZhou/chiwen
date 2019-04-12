@@ -10,7 +10,7 @@ trait BackParam {
   require(isPow2(nOrder))
   val data_width = 32
   val wPhyAddr = log2Ceil(nPhyAddr)
-  val wOrder   = log2Ceil(nOrder)
+  val wOrder   = log2Ceil(nOrder) + 1
   val nCommit  = 4
   val nBrchjr  = 4
   val nInst    = 2
@@ -72,11 +72,12 @@ class State(val nEntry: Int) extends Bundle {
   val rename = Vec(32, Bool())
 }
 
-object CmpId { //if in1 <= in2 then true, else false FIXME tongyi
-  def apply(in1: UInt, in2: UInt, head: UInt): Bool = {
-    (head < in1 && (in1 <= in2 || in2 < head)) ||
-    (head > in1 &&  in1 <= in2 && in2 < head)  ||
-    head === in1
+object CmpId { //if in1 <= in2 then true, else false
+  def apply(in1: UInt, in2: UInt, head: UInt, id_width: Int): Bool = {//TODO: id_width = wOrder - 1
+    val cmp = in1(id_width-1,0) <= in2(id_width-1,0)
+    Mux(in1(id_width) === head(id_width),
+      in1(id_width) =/= in2(id_width) || cmp,
+      in1(id_width) === in2(id_width) && cmp)
   }
 }
 
@@ -144,20 +145,19 @@ class StateCtrl extends Module with BackParam {
 
   val reorder = RegInit({
     val w = Wire(new Bundle{
-      val head = Vec(nCommit, UInt((wOrder+1).W))
-      val tail = Vec(nInst, UInt((wOrder+1).W))
+      val head = Vec(nCommit, UInt(wOrder.W))
+      val tail = Vec(nInst, UInt(wOrder.W))
       val commit  = UInt(nOrder.W)
       val useing  = Vec(nOrder, Bool())
       val useless = Vec(nOrder, Bool()) // recycle physical register resource
       def emtpy: Bool = head(0) === tail(0)
-      def tail_val0: Bool = head(0)(wOrder-1,0) =/= tail(0)(wOrder-1,0) || head(0)(wOrder) === tail(0)(wOrder)
-      def tail_val1: Bool = head(0)(wOrder-1,0) =/= tail(1)(wOrder-1,0) //FIXME
-      def head_val(i: Int): Bool = tail(0) =/= head(i) && commit(head(i)(wOrder-1,0))
-      def newphy(i: Int, in: Bool): Unit = { useing(tail(i)(wOrder-1,0)) := in}
-      def oldphy(i: Int, in: Bool): Unit = {useless(tail(i)(wOrder-1,0)) := in}
-      def wb_val(i: Int): Bool = useing(head(i)(wOrder-1,0))
-      def old_wb(i: Int): Bool = useless(head(i)(wOrder-1,0))
-      def kill_id(id: UInt): UInt = Cat(Mux(id < head(0)(wOrder-1,0),!head(0)(wOrder), head(0)(wOrder)), id)
+      def tail_val0: Bool = head(0)(wOrder-2,0) =/= tail(0)(wOrder-2,0) || head(0)(wOrder-1) === tail(0)(wOrder-1)
+      def tail_val1: Bool = head(0)(wOrder-2,0) =/= tail(1)(wOrder-2,0) //FIXME
+      def head_val(i: Int): Bool = tail(0) =/= head(i) && commit(head(i)(wOrder-2,0))
+      def newphy(i: Int, in: Bool): Unit = { useing(tail(i)(wOrder-2,0)) := in}
+      def oldphy(i: Int, in: Bool): Unit = {useless(tail(i)(wOrder-2,0)) := in}
+      def wb_val(i: Int): Bool = useing(head(i)(wOrder-2,0))
+      def old_wb(i: Int): Bool = useless(head(i)(wOrder-2,0))
     })
     w.head := VecInit(Seq(0.U, 1.U, 2.U, 3.U))
     w.tail := VecInit(Seq(0.U, 1.U))
@@ -166,7 +166,7 @@ class StateCtrl extends Module with BackParam {
     w.useless := DontCare
     w
   })
-  io.head  := reorder.head(0)(wOrder-1,0)
+  io.head  := reorder.head(0)
   io.empty := reorder.emtpy
   val xcpt = RegInit({
     val w = Wire(new XcptInfoI(wOrder))
@@ -178,12 +178,12 @@ class StateCtrl extends Module with BackParam {
     val epc = UInt(data_width.W)
     val flush = Vec(nCommit, Bool())
   })
-  xcpt_ctrl.epc   := id_pc(reorder.head(0)(wOrder-1,0))
-  xcpt_ctrl.flush := reorder.head.map(xcpt.valid && xcpt.id === _(wOrder-1,0))
-  when (io.xcpt_i.valid && (!xcpt.valid ||
-    CmpId(io.xcpt_i.id, xcpt.id, reorder.head(0)(wOrder-1,0)))) {
+  xcpt_ctrl.epc   := id_pc(reorder.head(0)(wOrder-2,0))
+  xcpt_ctrl.flush := reorder.head.map(xcpt.valid && xcpt.id === _)
+  when (io.xcpt_i.valid && (!xcpt.valid || CmpId(io.xcpt_i.id, xcpt.id, reorder.head(0), wOrder-1))) {
     xcpt.id := io.xcpt_i.id
   }
+
   when (xcpt_ctrl.flush(0))  {xcpt.valid := false.B
   }.elsewhen (io.xcpt_i.valid) {xcpt.valid := true.B
   }
@@ -193,19 +193,16 @@ class StateCtrl extends Module with BackParam {
   io.xcpt_o.pc := xcpt_ctrl.epc
   val order_ctrl = Wire(new Bundle {
     val inc_head  = Vec(nCommit, Bool())
-    val next_head = Vec(nCommit, UInt((wOrder+1).W))
-    val next_tail = Vec(nInst,   UInt((wOrder+1).W))
+    val next_head = Vec(nCommit, UInt(wOrder.W))
+    val next_tail = Vec(nInst,   UInt(wOrder.W))
     val physic    = Vec(nCommit, UInt(wPhyAddr.W))
     val oldphy    = Vec(nCommit, UInt(wPhyAddr.W))
     val logic     = Vec(nCommit, UInt(5.W))
     val commited  = Vec(nCommit, Bool())
     val register  = UInt(nOrder.W)
     val retiring  = UInt(nOrder.W)
-    val kill_tail = UInt((wOrder+1).W)
-    val kill      = Vec(nCommit, Bool())
+    val kill      = Vec(nCommit, Bool()) //whether or not to cancel inc_head
   })
-  order_ctrl.kill := reorder.head.map(io.kill.valid && io.kill.id === _(wOrder-1,0))
-
   for (i <- 0 until nCommit) {
     io.what(i).addr := order_ctrl.physic(i)
     when (RegNext(order_ctrl.commited(i))) {
@@ -214,18 +211,20 @@ class StateCtrl extends Module with BackParam {
         RegNext(reorder.wb_val(i)),
         RegNext(order_ctrl.logic(i)),
         io.what(i).data,
-        RegNext(reorder.head(i)(wOrder-1,0)),
+        RegNext(reorder.head(i)),
         RegNext(order_ctrl.physic(i))
       )
     }
   }
-  when (CycRange(io.cyc, 260, 265)) {
+  when (CycRange(io.cyc, 34, 36)) {
     printf(
 //      p"commit_31 ${reorder.commit(31)} " +
 //      p"commit_0 ${reorder.commit(0)} " +
-      p"t1->${latest.maptb(6)} " +
-      p"using->${latest.useing(4)} " +
-      p"split->${io.split} " +
+//      p"t1->${latest.maptb(6)} " +
+//      p"using->${latest.useing(4)} " +
+//      p"split->${io.split} " +
+      p"io.commit5 ${io.commit(1)} " +
+      p"commit5 ${reorder.commit(5)} " +
       p"tail ${reorder.tail(0)} " +
       p"tail_val ${reorder.tail_val0} " +
       p"id_ready0 ${io.id_ready} " +
@@ -235,15 +234,13 @@ class StateCtrl extends Module with BackParam {
       p"kill_id ${io.kill.id} " +
       p"kill_idx ${io.kill.bidx} " +
       p"head <val kill> " +
-      p"using4 ${latest.useing(4)} ")
+      p" ")
     for (i <- 0 until nCommit) printf(
       p"${reorder.head(i)} <${reorder.head_val(i)} ${order_ctrl.kill(i)}> ")
     printf("\n")
   }
 
-  order_ctrl.logic  := reorder.head.map(h => id_logic(h(wOrder-1,0)))
-  order_ctrl.physic := reorder.head.map(h => id_physic(h(wOrder-1,0)))
-  order_ctrl.oldphy := reorder.head.map(h => id_oldphy(h(wOrder-1,0)))
+  order_ctrl.kill := reorder.head.map(io.kill.valid && io.kill.id === _)
   for (i <- 0 until nCommit) {
     order_ctrl.inc_head(i) := reorder.head_val(i) && !xcpt_ctrl.flush(i) && !order_ctrl.kill(i)
     order_ctrl.commited(i) := (0 until i+1).map(j => order_ctrl.inc_head(j)).reduce(_&&_) // about 12~16 gates
@@ -262,12 +259,10 @@ class StateCtrl extends Module with BackParam {
   }
 
   order_ctrl.next_tail := reorder.tail.map(_ + nInst.U)
-  order_ctrl.kill_tail := reorder.kill_id(io.kill.id)
-
   when (xcpt_ctrl.flush(0)) {
     reorder.tail := Seq(reorder.head(0), reorder.head(1))
-  }.elsewhen(io.kill.valid) {
-    reorder.tail := Seq(order_ctrl.kill_tail, order_ctrl.kill_tail + 1.U)
+  }.elsewhen(io.kill.valid && CmpId(io.kill.id, reorder.tail(0), reorder.head(0), wOrder-1)) {
+    reorder.tail := Seq(io.kill.id, io.kill.id + 1.U)
   }.elsewhen(io.inc_order(0)) {
     when (io.inc_order(1)) {
       reorder.tail := Seq(order_ctrl.next_tail(0), order_ctrl.next_tail(1))
@@ -277,12 +272,12 @@ class StateCtrl extends Module with BackParam {
   }
   //around 24 gates
   order_ctrl.retiring := (0 until nCommit).map(i =>
-     Fill(nOrder, io.commit(i).valid) & UIntToOH(io.commit(i).id)).reduce(_|_) |
-    (Fill(nOrder, io.br_commit.valid) & UIntToOH(io.br_commit.bits)) |
-    (Fill(nOrder, io.st_commit.valid) & UIntToOH(io.st_commit.bits))
+     Fill(nOrder, io.commit(i).valid) & UIntToOH(io.commit(i).id(wOrder-2,0))).reduce(_|_) |
+    (Fill(nOrder, io.br_commit.valid) & UIntToOH(io.br_commit.bits(wOrder-2,0))) |
+    (Fill(nOrder, io.st_commit.valid) & UIntToOH(io.st_commit.bits(wOrder-2,0)))
 
-  order_ctrl.register := Mux(io.inc_order(0), UIntToOH(reorder.tail(0)(wOrder-1,0)) |
-    Mux(io.inc_order(1), UIntToOH(reorder.tail(1)(wOrder-1,0)), 0.U), 0.U)
+  order_ctrl.register := Mux(io.inc_order(0), UIntToOH(reorder.tail(0)(wOrder-2,0)) |
+    Mux(io.inc_order(1), UIntToOH(reorder.tail(1)(wOrder-2,0)), 0.U), 0.U)
   reorder.commit := (reorder.commit & (~order_ctrl.register).asUInt) | order_ctrl.retiring
 
   val rename = Wire(new Bundle {
@@ -323,7 +318,7 @@ class StateCtrl extends Module with BackParam {
   }
   when (io.inc_order(0)) {
     push(
-      tail   = reorder.tail(0)(wOrder-1,0),
+      tail   = reorder.tail(0)(wOrder-2,0),
       logic  = Mux(io.first, io.logic(0).rd.addr, io.logic(1).rd.addr),
       physic = Mux(io.first, io.physic(0).rd.addr, io.physic(1).rd.addr),
       oldphy = Mux(io.first, rename.rd(0), rename.rd(1)),
@@ -336,7 +331,7 @@ class StateCtrl extends Module with BackParam {
       latest.rename(io.logic(1).rd.addr) && io.logic(1).rd.valid))
     when (io.inc_order(1)) {
       push(
-        tail   = reorder.tail(1)(wOrder-1,0),
+        tail   = reorder.tail(1)(wOrder-2,0),
         logic  = io.logic(1).rd.addr,
         physic = io.physic(1).rd.addr,
         oldphy = Mux(rename.wtAwt, io.physic(0).rd.addr, rename.rd(1)),
@@ -370,6 +365,9 @@ class StateCtrl extends Module with BackParam {
     latest.maptb(logic)  := physics
     latest.rename(logic) := true.B
   }
+  order_ctrl.logic  := reorder.head.map(h => id_logic(h(wOrder-2,0)))
+  order_ctrl.physic := reorder.head.map(h => id_physic(h(wOrder-2,0)))
+  order_ctrl.oldphy := reorder.head.map(h => id_oldphy(h(wOrder-2,0)))
 
   phy_ctrl.useless_dec := (0 until nCommit).map(i => reorder.old_wb(i) && order_ctrl.commited(i))
   phy_ctrl.useless_cnt := PopCount(phy_ctrl.useless_dec)
@@ -489,8 +487,8 @@ class StateCtrl extends Module with BackParam {
 
   io.physic(0).rd.addr := PriorityEncoder(~latest.useing)
   io.physic(1).rd.addr := Mux(rename.wt, OHToUInt(phy_ctrl.tail(1)), io.physic(0).rd.addr)
-  io.physic(0).id := reorder.tail(0)(wOrder-1,0)
-  io.physic(1).id := Mux(io.first, reorder.tail(1)(wOrder-1,0), reorder.tail(0)(wOrder-1,0))
+  io.physic(0).id := reorder.tail(0)
+  io.physic(1).id := Mux(io.first, reorder.tail(1), reorder.tail(0))
   phy_ready(0) := latest.usecnt =/= nPhyAddr.U
   phy_ready(1) := latest.usecnt  <  nPhyAddr.U
   io.phy_ready(0) := phy_ready(0)
