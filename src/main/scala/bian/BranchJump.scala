@@ -2,6 +2,7 @@ package bian
 
 import chisel3._
 import chisel3.util._
+import common.CycRange
 
 trait BjParam extends BackParam {
   val nEntry = nBrchjr
@@ -45,6 +46,8 @@ class BranchJump extends Module with BjParam {
     val feedback = Output(Valid(new Predict(data_width)))
     val fb_pc   = Output(UInt(data_width.W))
     val fb_type = Output(UInt(BTBType.SZ.W))
+
+    val cyc = Input(UInt(data_width.W))
   })
 
   val bj_valid = RegInit(VecInit(Seq.fill(nEntry){
@@ -57,8 +60,19 @@ class BranchJump extends Module with BjParam {
   val br_type = Reg(Vec(nEntry, UInt(BR_N.getWidth.W)))
   val bj_table = Mem(nEntry, new BrjrEntry(data_width))
   val bj_queue = Reg(Vec(nEntry, new BrjrIssue(wOrder, wEntry)))
-  val bj_count = RegInit(0.U(wCount.W))
-
+  val bj_reg = RegInit({
+    val w = Wire(new Bundle{
+      val count    = UInt(wCount.W)
+      val fwd_kill = Bool()
+      val fwd_id   = UInt(wOrder.W)
+      val fwd_ptr  = UInt(wEntry.W)
+    })
+    w.count := 0.U
+    w.fwd_kill := DontCare
+    w.fwd_id   := DontCare
+    w.fwd_ptr  := DontCare
+    w
+  })
   val bj_ctrl = Wire(new Bundle {
     val head_id = UInt(wOrder.W) /*reorder buffer head id, the first inst*/
     val issue_id = Vec(3, UInt(wOrder.W)) /*input issue id in exe stage*/
@@ -122,13 +136,17 @@ class BranchJump extends Module with BjParam {
   io.feedback.bits.redirect := bj_ctrl.fwd_actual
   io.feedback.bits.tgt      := bj_ctrl.fwd_tgt
   io.kill.valid       := bj_ctrl.fwd_kill
-  io.kill.id          := bj_ctrl.fwd_id
+  io.kill.id          := bj_ctrl.fwd_id //FIXME: NOTICE: current branch jump inst not the next inst to begin killed
   io.kill.bidx        := bj_ctrl.fwd_bidx
   io.commit.valid     := bj_ctrl.pop_valid
   io.commit.bits      := bj_ctrl.pop_issue.id
   io.mask := (0 until 3).map(i => bj_ctrl.mask(i, io.issue(i).branch))
   io.brtype := bj_ctrl.table_idcam.map(i => Mux1H(i, br_type))
   io.cdlink := bj_ctrl.table_idcam.map(i => Mux1H(i, cd_link))
+
+  bj_reg.fwd_kill := bj_ctrl.fwd_kill
+  bj_reg.fwd_id   := bj_ctrl.fwd_id
+  bj_reg.fwd_ptr  := bj_ctrl.fwd_ptr
 
   bj_ctrl.head_id     := io.head
   bj_ctrl.issue_id    := io.issue.map(_.id)
@@ -152,8 +170,9 @@ class BranchJump extends Module with BjParam {
     br_type(bj_ctrl.bidx)  := io.in.bits.brtype
   }
 
-  bj_ctrl.table_kill := bj_valid.map(t => bj_ctrl.fwd_kill &&
-    CmpId(bj_ctrl.fwd_id, t.bits, bj_ctrl.head_id))
+
+  bj_ctrl.table_kill := bj_valid.map(t => bj_reg.fwd_kill &&
+    CmpId(bj_reg.fwd_id, t.bits, bj_ctrl.head_id))
   for (i <- 0 until nEntry) {
     when (io.xcpt || bj_ctrl.table_kill(i)) {
       bj_valid(i).valid := false.B
@@ -167,12 +186,12 @@ class BranchJump extends Module with BjParam {
     }
   }
 
-  bj_ctrl.tail := bj_count - 1.U //no need to update bj_count using combi logic
-  when (io.xcpt) {bj_count := 0.U
-  }.elsewhen(bj_ctrl.fwd_kill) {bj_count := bj_ctrl.fwd_ptr
+  bj_ctrl.tail := bj_reg.count - 1.U //no need to update bj_count using combi logic
+  when (io.xcpt) {bj_reg.count := 0.U
+  }.elsewhen(bj_reg.fwd_kill) {bj_reg.count := bj_reg.fwd_ptr
   }.otherwise {
-    when (io.in.valid && !bj_ctrl.forward) {bj_count := bj_count + 1.U}
-    when (!io.in.valid && bj_ctrl.forward) {bj_count := bj_ctrl.tail}
+    when (io.in.valid && !bj_ctrl.forward) {bj_reg.count := bj_reg.count + 1.U}
+    when (!io.in.valid && bj_ctrl.forward) {bj_reg.count := bj_ctrl.tail}
   }
 
   def updateQueue(i: Int): Unit = {
@@ -190,7 +209,7 @@ class BranchJump extends Module with BjParam {
   def stable_queue: Seq[Bool] = (0 until nEntry).map(i => i.U  <  bj_ctrl.fwd_ptr)
   def shift_queue : Seq[Bool] = (0 until nEntry).map(i => i.U  <  bj_ctrl.tail(wEntry-1,0))
   def touch_tail  : Seq[Bool] = (0 until nEntry).map(i => i.U === bj_ctrl.tail(wEntry-1,0))
-  def touch_count : Seq[Bool] = (0 until nEntry).map(i => i.U === bj_count(wEntry-1,0))
+  def touch_count : Seq[Bool] = (0 until nEntry).map(i => i.U === bj_reg.count(wEntry-1,0))
 
   for (i <- 0 until nEntry) {
     when (bj_ctrl.forward) {
@@ -231,27 +250,53 @@ class BranchJump extends Module with BjParam {
     }
   }
 
-  printf(p"output: ready->${io.in.ready} bid1H->${io.bid1H} fb_pc->${io.fb_pc} fb_type->${io.fb_type} " +
-    p"fb_valid->${io.feedback.valid} fb_redirect->${io.feedback.bits.redirect} fb_tgt->${io.feedback.bits.tgt}\n")
-  printf(p"output: kill_val->${io.kill.valid} kill_id->${io.kill.id} kill_bidx->${io.kill.bidx} " +
-    p"commit_val->${io.commit.valid} commit_id->${io.commit.bits}\n")
-  printf(p"output: mask->Vec(${io.mask(0)}, ${io.mask(1)}, ${io.mask(2)}) " +
-    p"br_type->Vec(${io.brtype(0)}, ${io.brtype(1)}, ${io.brtype(2)}) " +
-    p"cd_link->Vec(${io.cdlink(0)}, ${io.cdlink(1)}, ${io.cdlink(2)})\n")
-  printf(p"bj_ctrl: update->${bj_ctrl.update} actual->${bj_ctrl.actual} forward->${bj_ctrl.forward} tail->${bj_ctrl.tail} " +
-    p"fwd_ptr->${bj_ctrl.fwd_ptr} fwd_kill->${bj_ctrl.fwd_kill}\n")
-  val queue_id     = Wire(Vec(nEntry, UInt()))
-  val queue_val    = Wire(Vec(nEntry, Bool()))
-  val queue_actual = Wire(Vec(nEntry, Bool()))
-  val queue_branch = Wire(Vec(nEntry, Bool()))
-  queue_id     := bj_queue.map(_.id)
-  queue_val    := bj_queue.map(_.valid)
-  queue_actual := bj_queue.map(_.actual)
-  queue_branch := bj_queue.map(_.branch)
-  printf(p"table_valid: Vec(${bj_valid(0).valid}->${bj_valid(0).bits} ${bj_valid(1).valid}->${bj_valid(1).bits} " +
-    p"${bj_valid(2).valid}->${bj_valid(2).bits} ${bj_valid(3).valid}->${bj_valid(3).bits})\n")
-  printf(p"counter: $bj_count queue: id->$queue_id valid->$queue_val actual->$queue_actual branch->$queue_branch\n")
-  val cnt = RegInit(0.U(32.W))
-  cnt := cnt + 1.U
-  printf(p"=======================cnt = $cnt=============================\n")
+  when (CycRange(io.cyc, 469, 479)) {
+//    for (i <- 0 until 3) {
+//      printf(
+//        p"issue valid ${io.issue(i).valid} " +
+//          p"branch ${io.issue(i).branch} " +
+//          p"actual ${io.issue(i).actual} " +
+//          p"brtype ${io.brtype(i)} " +
+//          p"hit ${bj_ctrl.valid(i)}\n")
+//    }
+//    printf(p"output: " +
+//      p"ready->${io.in.ready} " +
+//      p"bid1H->${io.bid1H} " +
+//      p"fb_pc->${Hexadecimal(io.fb_pc)} " +
+//      p"fb_type->${io.fb_type} " +
+//      p"fb_valid->${io.feedback.valid} " +
+//      p"fb_redirect->${io.feedback.bits.redirect} " +
+//      p"fb_tgt->${Hexadecimal(io.feedback.bits.tgt)}\n")
+//
+//    printf(p"output: " +
+//      p"kill_val->${io.kill.valid} " +
+//      p"kill_id->${io.kill.id} " +
+//      p"kill_bidx->${io.kill.bidx} " +
+//      p"commit_val->${io.commit.valid} " +
+//      p"commit_id->${io.commit.bits}\n")
+//
+//    printf(p"output: mask->Vec(${io.mask(0)}, ${io.mask(1)}, ${io.mask(2)}) " +
+////      p"br_type->Vec(${io.brtype(0)}, ${io.brtype(1)}, ${io.brtype(2)}) " +
+////      p"cd_link->Vec(${io.cdlink(0)}, ${io.cdlink(1)}, ${io.cdlink(2)})" +
+//      p"\n")
+//    printf(p"bj_ctrl: update->${bj_ctrl.update} actual->${bj_ctrl.actual} forward->${bj_ctrl.forward} tail->${bj_ctrl.tail} " +
+//      p"fwd_ptr->${bj_ctrl.fwd_ptr} fwd_kill->${bj_ctrl.fwd_kill}\n")
+    val queue_id     = Wire(Vec(nEntry, UInt()))
+    val queue_val    = Wire(Vec(nEntry, Bool()))
+    val queue_actual = Wire(Vec(nEntry, Bool()))
+    val queue_branch = Wire(Vec(nEntry, Bool()))
+    queue_id     := bj_queue.map(_.id)
+    queue_val    := bj_queue.map(_.valid)
+    queue_actual := bj_queue.map(_.actual)
+    queue_branch := bj_queue.map(_.branch)
+    printf(p"fwd_kill ${bj_reg.fwd_kill} in_valid ${io.in.valid} " +
+      p"fwd_id ${bj_reg.fwd_id} head_id ${bj_ctrl.head_id}\n")
+    printf(p"table_valid: Vec(${bj_valid(0).valid}->${bj_valid(0).bits} ${bj_valid(1).valid}->${bj_valid(1).bits} " +
+      p"${bj_valid(2).valid}->${bj_valid(2).bits} ${bj_valid(3).valid}->${bj_valid(3).bits})\n")
+    printf(p"counter: ${bj_reg.count} queue: id->$queue_id valid->$queue_val actual->$queue_actual branch->$queue_branch\n")
+  }
+
+//  val cnt = RegInit(0.U(32.W))
+//  cnt := cnt + 1.U
+//  printf(p"=======================cnt = $cnt=============================\n")
 }

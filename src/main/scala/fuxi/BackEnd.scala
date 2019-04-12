@@ -416,11 +416,8 @@ class BackEnd(implicit conf: CPUConfig) extends Module with BTBParams {
 
   // Printout
   for (i <- 0 until 2) {
-    printf("Core: Cyc= %d WB[ %x %x %x] (%x, %x, %x) [%c%c %c%c %c%c] %c%c %c%c Exe: DASM(%x)\n"
+    printf("Core: Cyc= %d PC(%x, %x, %x) [%c%c %c%c %c%c] %c%c %c%c Exe: DASM(%x)\n"
       , io.cyc
-      , wb_wire(i).rf_wen
-      , wb(i).wbaddr
-      , regfile.io.wdata(i)
       , io.front.pc(i)
       , exe(i).pc
       , mem(i).pc
@@ -435,6 +432,15 @@ class BackEnd(implicit conf: CPUConfig) extends Module with BTBParams {
       , Mux(!exe_valid(i) || xcpt.valid || (exe_cancel && i.U === 1.U) ||
         stall(1)(Stage.MEM) || (stall(1)(Stage.EXE) && i.U === 1.U), BUBBLE, exe(i).inst)
     )
+
+    when (wb_valid(i)) {
+      printf("Core: Cyc= %d WB[ %x %x %x]\n"
+        , io.cyc
+        , wb_wire(i).rf_wen
+        , wb(i).wbaddr
+        , regfile.io.wdata(i)
+      )
+    }
   }
   //  when (io.cyc === 14228.U || io.cyc === 14229.U) {
   //    printf(p"Debug: ${io.cyc} exe_valid $exe_valid\n")

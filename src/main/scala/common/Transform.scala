@@ -89,7 +89,7 @@ class Transform(implicit conf: CPUConfig) extends Module {
     io.outer.req.valid     := valid
     io.inner.r.valid       := valid
     io.outer.req.bits.addr := Mux(valid_cnt =/= 0.U, burst_addr,
-                              Mux(first_valid, first_addr, double_addr))
+      Mux(first_valid, first_addr, double_addr))
 
     io.inner.ar.ready      := Latch(lfsr5 > 12.U && lfsr5 < 18.U, cnt(2).toBool)
     io.inner.r.last        := valid_cnt === 15.U
@@ -130,11 +130,18 @@ class SimpleTrans(implicit conf: CPUConfig) extends Module {
   io.outer.req.valid := valid
   io.outer.req.bits  := bits
   io.inner.resp := io.outer.resp
-  when (io.inner.req.valid && !stall && io.inner.req.bits.fcn === M_XWR) {
-    printf("Memory: Cyc= %d WB[ %x %x %x]\n",
-      io.cyc,
-      io.inner.req.bits.typ,
-      io.inner.req.bits.addr,
-      io.inner.req.bits.data)
+  when (io.inner.req.valid && !stall) {
+    printf("Memory: Cyc= %d ", io.cyc)
+    when (io.inner.req.bits.fcn === M_XWR) {
+      printf("STORE[ %x %x %x]\n",
+        io.inner.req.bits.typ,
+        io.inner.req.bits.addr,
+        io.inner.req.bits.data)
+    }.otherwise {
+      printf("LOAD[ %x %x]\n",
+        io.inner.req.bits.typ,
+        io.inner.req.bits.addr)
+    }
   }
+
 }

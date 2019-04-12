@@ -80,22 +80,22 @@ class InstDecoder(implicit conf: CPUConfig) extends Module {
         BLT    -> List(Y, BR_LT , OP1_RS1, OP2_RS2   , OEN_1, OEN_1, ALU_X   , WB_X  , REN_0, MEN_0, M_X  , MT_X, CSR.N, N, N , CYC_1),
         BLTU   -> List(Y, BR_LTU, OP1_RS1, OP2_RS2   , OEN_1, OEN_1, ALU_X   , WB_X  , REN_0, MEN_0, M_X  , MT_X, CSR.N, N, N , CYC_1),
 
-        CSRRWI -> List(Y, BR_N  , OP1_IMZ, OP2_X     , OEN_1, OEN_1, ALU_COPY_1,WB_CSR,REN_1, MEN_0, M_X  , MT_X, CSR.W, N, Y , CYC_X),
-        CSRRSI -> List(Y, BR_N  , OP1_IMZ, OP2_X     , OEN_1, OEN_1, ALU_COPY_1,WB_CSR,REN_1, MEN_0, M_X  , MT_X, CSR.S, N, Y , CYC_X),
-        CSRRCI -> List(Y, BR_N  , OP1_IMZ, OP2_X     , OEN_1, OEN_1, ALU_COPY_1,WB_CSR,REN_1, MEN_0, M_X  , MT_X, CSR.C, N, Y , CYC_X),
-        CSRRW  -> List(Y, BR_N  , OP1_RS1, OP2_X     , OEN_1, OEN_1, ALU_COPY_1,WB_CSR,REN_1, MEN_0, M_X  , MT_X, CSR.W, N, Y , CYC_X),
-        CSRRS  -> List(Y, BR_N  , OP1_RS1, OP2_X     , OEN_1, OEN_1, ALU_COPY_1,WB_CSR,REN_1, MEN_0, M_X  , MT_X, CSR.S, N, Y , CYC_X),
-        CSRRC  -> List(Y, BR_N  , OP1_RS1, OP2_X     , OEN_1, OEN_1, ALU_COPY_1,WB_CSR,REN_1, MEN_0, M_X  , MT_X, CSR.C, N, Y , CYC_X),
+        CSRRWI -> List(Y, BR_N  , OP1_IMZ, OP2_X     , OEN_1, OEN_1, ALU_COPY_1,WB_CSR,REN_1, MEN_0, M_X  , MT_X, CSR.W, N, Y , CYC_1),
+        CSRRSI -> List(Y, BR_N  , OP1_IMZ, OP2_X     , OEN_1, OEN_1, ALU_COPY_1,WB_CSR,REN_1, MEN_0, M_X  , MT_X, CSR.S, N, Y , CYC_1),
+        CSRRCI -> List(Y, BR_N  , OP1_IMZ, OP2_X     , OEN_1, OEN_1, ALU_COPY_1,WB_CSR,REN_1, MEN_0, M_X  , MT_X, CSR.C, N, Y , CYC_1),
+        CSRRW  -> List(Y, BR_N  , OP1_RS1, OP2_X     , OEN_1, OEN_1, ALU_COPY_1,WB_CSR,REN_1, MEN_0, M_X  , MT_X, CSR.W, N, Y , CYC_1),
+        CSRRS  -> List(Y, BR_N  , OP1_RS1, OP2_X     , OEN_1, OEN_1, ALU_COPY_1,WB_CSR,REN_1, MEN_0, M_X  , MT_X, CSR.S, N, Y , CYC_1),
+        CSRRC  -> List(Y, BR_N  , OP1_RS1, OP2_X     , OEN_1, OEN_1, ALU_COPY_1,WB_CSR,REN_1, MEN_0, M_X  , MT_X, CSR.C, N, Y , CYC_1),
 
-        ECALL  -> List(Y, BR_N  , OP1_X  , OP2_X     , OEN_0, OEN_0, ALU_X   , WB_X  , REN_0, MEN_0, M_X  , MT_X, CSR.I, N, Y , CYC_X),
-        MRET   -> List(Y, BR_N  , OP1_X  , OP2_X     , OEN_0, OEN_0, ALU_X   , WB_X  , REN_0, MEN_0, M_X  , MT_X, CSR.I, N, Y , CYC_X),
-        DRET   -> List(Y, BR_N  , OP1_X  , OP2_X     , OEN_0, OEN_0, ALU_X   , WB_X  , REN_0, MEN_0, M_X  , MT_X, CSR.I, N, Y , CYC_X),
-        EBREAK -> List(Y, BR_N  , OP1_X  , OP2_X     , OEN_0, OEN_0, ALU_X   , WB_X  , REN_0, MEN_0, M_X  , MT_X, CSR.I, N, Y , CYC_X),
-        WFI    -> List(Y, BR_N  , OP1_X  , OP2_X     , OEN_0, OEN_0, ALU_X   , WB_X  , REN_0, MEN_0, M_X  , MT_X, CSR.N, N, Y , CYC_X),
+        ECALL  -> List(Y, BR_N  , OP1_X  , OP2_X     , OEN_0, OEN_0, ALU_X   , WB_X  , REN_0, MEN_0, M_X  , MT_X, CSR.I, N, Y , CYC_1),
+        MRET   -> List(Y, BR_N  , OP1_X  , OP2_X     , OEN_0, OEN_0, ALU_X   , WB_X  , REN_0, MEN_0, M_X  , MT_X, CSR.I, N, Y , CYC_1),
+        DRET   -> List(Y, BR_N  , OP1_X  , OP2_X     , OEN_0, OEN_0, ALU_X   , WB_X  , REN_0, MEN_0, M_X  , MT_X, CSR.I, N, Y , CYC_1),
+        EBREAK -> List(Y, BR_N  , OP1_X  , OP2_X     , OEN_0, OEN_0, ALU_X   , WB_X  , REN_0, MEN_0, M_X  , MT_X, CSR.I, N, Y , CYC_1),
+        WFI    -> List(Y, BR_N  , OP1_X  , OP2_X     , OEN_0, OEN_0, ALU_X   , WB_X  , REN_0, MEN_0, M_X  , MT_X, CSR.N, N, Y , CYC_1),
 
-        FENCE_I-> List(Y, BR_N  , OP1_X  , OP2_X     , OEN_0, OEN_0, ALU_X   , WB_X  , REN_0, MEN_0, M_X  , MT_X, CSR.N, Y, Y , CYC_X),
+        FENCE_I-> List(Y, BR_N  , OP1_X  , OP2_X     , OEN_0, OEN_0, ALU_X   , WB_X  , REN_0, MEN_0, M_X  , MT_X, CSR.N, Y, Y , CYC_1),
         // kill pipeline and refetch instructions since the pipeline will be holding stall instructions.
-        FENCE  -> List(Y, BR_N  , OP1_X  , OP2_X     , OEN_0, OEN_0, ALU_X   , WB_X  , REN_0, MEN_1, M_X  , MT_X, CSR.N, N, Y , CYC_X)
+        FENCE  -> List(Y, BR_N  , OP1_X  , OP2_X     , OEN_0, OEN_0, ALU_X   , WB_X  , REN_0, MEN_0, M_X  , MT_X, CSR.N, N, Y , CYC_1)
         // we are already sequentially consistent, so no need to honor the fence instruction
       ))
 
@@ -103,8 +103,9 @@ class InstDecoder(implicit conf: CPUConfig) extends Module {
   val (val_inst: Bool) :: br_type :: op1_sel :: op2_sel :: (rs1_oen: Bool) :: (rs2_oen: Bool) :: sig1 = signals
   val alu_fun :: wb_sel :: (rd_wen: Bool) :: (mem_en: Bool) :: mem_fcn :: mem_typ :: sig2 = sig1
   val csr_cmd :: (fencei: Bool) :: (order: Bool) :: cycle :: Nil = sig2
-  io.op1_sel := Mux(io.rs(0).addr === 0.U, OP1_X, op1_sel)
-  io.op2_sel := Mux(io.rs(1).addr === 0.U, OP2_X, op2_sel(1,0)) // for space saving, and change OP2_STYPE to OP22_RS2
+  io.op1_sel := Mux(io.rs(0).addr === 0.U && op1_sel === OP1_RS1, OP1_X, op1_sel)
+  io.op2_sel := Mux(io.rs(1).addr === 0.U && op2_sel === OP2_RS2, OP22_X, op2_sel(1,0))
+  // for space saving, and change OP2_STYPE to OP22_RS2
   io.op.alu_fun := alu_fun
   io.op.wb_sel  := wb_sel
   io.op.cycle   := cycle
@@ -128,11 +129,10 @@ class InstDecoder(implicit conf: CPUConfig) extends Module {
 
   // immediates
   val imm_itype  = io.inst(31,20)
-  val imm_utype  = io.inst(31,12)
   val imm_stype  = Cat(io.inst(31,25), io.inst(11,7))
 
   // sign-extend immediates
   io.imm    := Mux(op2_sel === OP2_STYPE, imm_stype, imm_itype)
-  io.imm7_0 := imm_utype(7,0)
+  io.imm7_0 := io.inst(19,12)
   io.imm_z  := Cat(Fill(27, 0.U(1.W)), io.inst(19,15))
 }

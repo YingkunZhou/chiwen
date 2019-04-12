@@ -36,10 +36,15 @@ class InstInfo(addr_width: Int)
   val op2_sel = UInt(OP22_X.getWidth.W)
 }
 
-class InstIssue(val addr_width: Int, id_width: Int)
+class InstIssueI(id_width: Int, val addr_width: Int)
   extends Issue(id_width) {
   val rs = Vec(2, new ByPass(addr_width))
   val info = new InstInfo(addr_width)
+}
+
+class InstIssueO(id_width: Int, addr_width: Int, val nCommit: Int)
+  extends InstIssueI(id_width, addr_width) {
+  val data_sel = Vec(2, UInt(nCommit.W))
 }
 
 class PriorityKill(val nEntry: Int) extends Bundle {
@@ -61,9 +66,8 @@ trait InstParam extends BackParam {
 
 class InstQueue extends Module with InstParam {
   val io = IO(new Bundle{
-    val in = Flipped(DecoupledIO(new InstIssue(wPhyAddr, wOrder)))
-    val issue = DecoupledIO(new InstIssue(wPhyAddr, wOrder))
-    val data_sel = Output(Vec(2, UInt(nCommit.W)))
+    val in = Flipped(DecoupledIO(new InstIssueI(wOrder, wPhyAddr)))
+    val issue = DecoupledIO(new InstIssueO(wOrder, wPhyAddr, nCommit))
 
     val issueable = Input(Valid(UInt(wOrder.W)))
     val bypass  = Input(Vec(nCommit, new ByPass(wPhyAddr)))
@@ -142,7 +146,7 @@ class InstQueue extends Module with InstParam {
   }
   io.issue.bits.mem_en   := issue.entry.mem_en
   io.issue.bits.info     := inst_ctrl.entry
-  io.data_sel := issue.rs.map(rs => VecInit(
+  io.issue.bits.data_sel := issue.rs.map(rs => VecInit(
     io.bypass.map(bypass => bypass.addr === rs.addr && bypass.valid)).asUInt)
 
   io.forward.addr  := inst_ctrl.entry.rd.addr
@@ -157,7 +161,7 @@ class InstQueue extends Module with InstParam {
 
   inst_ctrl.issue_kill  := io.kill.valid && CmpId(io.kill.bits, issue.entry.id, io.head)
   inst_ctrl.issue_stall := !io.issue.ready && !inst_ctrl.issue_kill
-  inst_ctrl.issue_valid := (0 until 2).map(i => io.data_sel(i).orR || issue.rs(i).valid)
+  inst_ctrl.issue_valid := (0 until 2).map(i => io.issue.bits.data_sel(i).orR || issue.rs(i).valid)
 
   inst_ctrl.kill.cmp   := inst_queue.map(i => CmpId(io.kill.bits, i.id, io.head))
   inst_ctrl.kill.kill  := io.kill.valid
@@ -289,15 +293,15 @@ class InstQueue extends Module with InstParam {
     }
   }
 
-  printf(p"issue $issue\n")
-  printf(p"count $inst_count queue ")
-  for (i <- 0 until nEntry) {
-    printf(p"${queue_valid(i)}->${inst_queue(i).id} ")
-  }
-  printf(p"\nsnoop ${inst_ctrl.snoop}\n")
-  printf(p"valid_head ${inst_ctrl.issue_valid}\n")
-  printf(p"ready ${inst_ctrl.limit}\n")
-  val cnt = RegInit(0.U(32.W))
-  cnt := cnt + 1.U
-  printf(p"=======================cnt = $cnt=============================\n")
+//  printf(p"issue $issue\n")
+//  printf(p"count $inst_count queue ")
+//  for (i <- 0 until nEntry) {
+//    printf(p"${queue_valid(i)}->${inst_queue(i).id} ")
+//  }
+//  printf(p"\nsnoop ${inst_ctrl.snoop}\n")
+//  printf(p"valid_head ${inst_ctrl.issue_valid}\n")
+//  printf(p"ready ${inst_ctrl.limit}\n")
+//  val cnt = RegInit(0.U(32.W))
+//  cnt := cnt + 1.U
+//  printf(p"=======================cnt = $cnt=============================\n")
 }

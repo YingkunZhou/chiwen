@@ -2,7 +2,7 @@ package bian
 
 import chisel3._
 import chisel3.util._
-import common.MemPortIo
+import common.{CycRange, MemPortIo}
 
 object Above {
   def apply(num: UInt, w: Int): UInt = VecInit((0 until w).map(_.U >= num)).asUInt
@@ -204,6 +204,7 @@ class LoadStore extends Module with LsParam {
     val kill = Input(Valid(UInt(wOrder.W)))
     val head = Input(UInt(wOrder.W))
     val rollback = Output(Valid(UInt(wOrder.W))) //the role same as except
+    val cyc = Input(UInt(data_width.W))
   })
   /*TODO List:
   * 1. need to accelerate rollback time???*/
@@ -608,29 +609,38 @@ class LoadStore extends Module with LsParam {
   io.mem.req.bits.addr:= Mux(mem.store, store_queue.head_addr,
     Mux(mem.fwd_stall, mem_reg.ld_addr, Mux(mem.fwd_fcn === M_XWR, store_queue.addr, load_queue.addr)))
 
-  printf(p"output: ready->Vec(${io.in(0).ready}, ${io.in(1).ready}) isseable->${io.issueable.valid}:" +
-    p"${io.issueable.bits} forward->${io.forward.valid}:${io.forward.addr}\n" +
-    p"output: ldcommit->${io.ldcommit.valid} wb_val->${io.ldcommit.valid} id->${io.ldcommit.id} " +
-    p"wb_addr->${io.ldcommit.wb.addr} wb_data->${io.wb_data}\n" +
-    p"output: rollback->${io.rollback.valid}:${io.rollback.bits} stcommit->${io.stcommit.valid}:" +
-    p"${io.stcommit.bits}\n" +
-    p"output: id-> ${load_queue.id} req_val->${io.mem.req.valid} req_fcn->${io.mem.req.bits.fcn} req_addr->${io.mem.req.bits.addr} " +
-    p"req_typ->${io.mem.req.bits.typ} data->${io.mem.req.bits.data}\n")
-  printf(p"load queue: head->${load_queue.head} inc_head->${load_ctrl.inc_head} tail->${load_queue.tail} " +
-    p"inc_tail->${load_ctrl.inc_tail}\n")
-  printf(p"store queue: head->${store_queue.head} inc_head->${store_ctrl.inc_head} tail->${store_queue.tail} " +
-    p"inc_tail->${store_ctrl.inc_tail}\n")
-  printf(p"ldst queue: head->${queue.head} tail->${queue.tail}\n")
-  printf(p"mem ctrl: store->${mem.store} fwd_stall->${mem.fwd_stall} fwd_fcn->${mem.fwd_fcn} " +
-    p"st_lsptr->${store_queue.ls_valid}:${store_queue.ls_ptr} " +
-    p"ld_lsptr->${load_queue.ls_valid}:${load_queue.ls_ptr}\n" +
-    p"mem_reg: unsafe->${load_queue.unsafe(mem_reg.ld_ptr)} data_ok->${load_queue.data_ok(mem_reg.ld_ptr)} " +
-    p"store_addr_ok->${store_queue.head_addr_ok}\n")
-  printf(p"mem reg: fwd_mux1H->${mem_reg.fwd_mux1H} fwd_valid->${mem_reg.fwd_valid} valid->${mem_reg.valid}\n" +
-    p"ld_id->${mem_reg.ld_id} ld_typ->${mem_reg.ld_typ} ld_ptr->${mem_reg.ld_ptr} " +
-    p"wb_addr->${mem_reg.wb_addr} stq_ptr->${mem_reg.stq_ptr} unsafe->${mem_reg.unsafe}\n")
-
-  val cnt = RegInit(0.U(32.W))
-  cnt := cnt + 1.U
-  printf(p"=======================cnt = $cnt=============================\n")
+  when (CycRange(io.cyc, 746, 764)) {
+    printf(p"LoadStore input: valid ${io.in(0).valid} ${io.in(1).valid} " +
+      p"loadq ${load_queue.head} " +
+      p"${load_queue.tail} " +
+      p"Storeq ${store_queue.head}" +
+      p"${store_queue.tail}" +
+      p"ldstq ${queue.head}" +
+      p"${queue.tail} \n")
+  }
+//  printf(p"output: ready->Vec(${io.in(0).ready}, ${io.in(1).ready}) isseable->${io.issueable.valid}:" +
+//    p"${io.issueable.bits} forward->${io.forward.valid}:${io.forward.addr}\n" +
+//    p"output: ldcommit->${io.ldcommit.valid} wb_val->${io.ldcommit.valid} id->${io.ldcommit.id} " +
+//    p"wb_addr->${io.ldcommit.wb.addr} wb_data->${io.wb_data}\n" +
+//    p"output: rollback->${io.rollback.valid}:${io.rollback.bits} stcommit->${io.stcommit.valid}:" +
+//    p"${io.stcommit.bits}\n" +
+//    p"output: id-> ${load_queue.id} req_val->${io.mem.req.valid} req_fcn->${io.mem.req.bits.fcn} req_addr->${io.mem.req.bits.addr} " +
+//    p"req_typ->${io.mem.req.bits.typ} data->${io.mem.req.bits.data}\n")
+//  printf(p"load queue: head->${load_queue.head} inc_head->${load_ctrl.inc_head} tail->${load_queue.tail} " +
+//    p"inc_tail->${load_ctrl.inc_tail}\n")
+//  printf(p"store queue: head->${store_queue.head} inc_head->${store_ctrl.inc_head} tail->${store_queue.tail} " +
+//    p"inc_tail->${store_ctrl.inc_tail}\n")
+//  printf(p"ldst queue: head->${queue.head} tail->${queue.tail}\n")
+//  printf(p"mem ctrl: store->${mem.store} fwd_stall->${mem.fwd_stall} fwd_fcn->${mem.fwd_fcn} " +
+//    p"st_lsptr->${store_queue.ls_valid}:${store_queue.ls_ptr} " +
+//    p"ld_lsptr->${load_queue.ls_valid}:${load_queue.ls_ptr}\n" +
+//    p"mem_reg: unsafe->${load_queue.unsafe(mem_reg.ld_ptr)} data_ok->${load_queue.data_ok(mem_reg.ld_ptr)} " +
+//    p"store_addr_ok->${store_queue.head_addr_ok}\n")
+//  printf(p"mem reg: fwd_mux1H->${mem_reg.fwd_mux1H} fwd_valid->${mem_reg.fwd_valid} valid->${mem_reg.valid}\n" +
+//    p"ld_id->${mem_reg.ld_id} ld_typ->${mem_reg.ld_typ} ld_ptr->${mem_reg.ld_ptr} " +
+//    p"wb_addr->${mem_reg.wb_addr} stq_ptr->${mem_reg.stq_ptr} unsafe->${mem_reg.unsafe}\n")
+//
+//  val cnt = RegInit(0.U(32.W))
+//  cnt := cnt + 1.U
+//  printf(p"=======================cnt = $cnt=============================\n")
 }

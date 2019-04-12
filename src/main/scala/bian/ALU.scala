@@ -36,7 +36,7 @@ class ALU extends Module with BackParam {
   val br_ltu: Bool = io.data(0).asUInt < io.data(1).asUInt
   // Branch Logic
   io.actual :=
-    (io.brtype === BR_N   && !br_eq)  ||
+    (io.brtype === BR_NE  && !br_eq)  ||
     (io.brtype === BR_EQ  && br_eq)   ||
     (io.brtype === BR_GE  && !br_lt)  ||
     (io.brtype === BR_GEU && !br_ltu) ||

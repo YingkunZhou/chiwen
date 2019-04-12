@@ -16,13 +16,20 @@ class WriteIO(val data_width: Int, val addr_width: Int) extends Bundle {
 
 class Regfile extends Module with BackParam {
   val io = IO(new Bundle{
-    val r = Vec(nCommit, new ReadIO(data_width,  log2Ceil(nPhyAddr)))
-    val w = Vec(nCommit, new WriteIO(data_width, log2Ceil(nPhyAddr)))
+    val read = Vec(nInst, Vec(2, new ReadIO(data_width,  log2Ceil(nPhyAddr))))
+    val write = Vec(nCommit, new WriteIO(data_width, log2Ceil(nPhyAddr)))
+    val debug = Vec(nCommit, new ReadIO(data_width, log2Ceil(nPhyAddr)))
   })
 
   val regfile = SyncReadMem(nPhyAddr, UInt(data_width.W))
+  for (i <- 0 until nInst; j <- 0 until 2) {
+    io.read(i)(j).data := regfile(io.read(i)(j).addr)
+  }
+
   for (i <- 0 until nCommit) {
-    io.r(i).data := regfile(io.r(i).addr)
-    when (io.w(i).valid) {regfile(io.w(i).addr) := io.w(i).data} //no write after write hazard
+    io.debug(i).data := regfile(io.debug(i).addr)
+    when (io.write(i).valid) {
+      regfile(io.write(i).addr) := io.write(i).data
+    } //no write after write hazard
   }
 }
