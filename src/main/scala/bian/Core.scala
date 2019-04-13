@@ -1,23 +1,20 @@
 package bian
 
 import chisel3._
-import chisel3.util.Valid
+import chisel3.util.{DecoupledIO, Valid}
 import common.{AxiIO, CPUConfig, MemPortIo}
 
-class InterfaceIO(val data_width: Int) extends Bundle {
-  val xcpt     = Input(new Valid(UInt(data_width.W)))
-  val kill     = Input(Bool())
-  val forward  = Input(Vec(2, Bool()))
-  //dec stage
-  val inst     = Output(Vec(2, Valid(UInt(data_width.W))))
-  //rename stage
-  val pred     = Output(new PredictInfo(data_width))
-  val pc_split = Output(Bool())
-  val inst_split = Output(Bool())
+class InterfaceIO(implicit val conf: CPUConfig) extends Bundle {
+  val xcpt = Input(Valid(UInt(conf.data_width.W)))
+  val kill = Input(Valid(UInt(conf.data_width.W)))
 
-  val fb_pc    = Input(UInt(data_width.W))
+  val fb_pc    = Input(UInt(conf.data_width.W))
   val fb_type  = Input(UInt(BTBType.SZ.W))
-  val feedback = Input(Valid(new Predict(data_width)))
+  val feedback = Input(Valid(new Predict(conf.data_width)))
+
+  val inst = Vec(conf.nInst, DecoupledIO(UInt(conf.inst_width.W)))
+  val pred = Output(new PredictInfo(conf.data_width))
+  val pc   = Output(Vec(conf.nInst, UInt(conf.data_width.W)))
 }
 
 class Core(implicit conf: CPUConfig) extends Module with BTBParams {

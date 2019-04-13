@@ -17,43 +17,26 @@ class BackEnd(implicit conf: CPUConfig) extends Module with BackParam {
   val io = IO(new Bundle {
     val mem  = new MemPortIo(conf.xprlen)
     val cyc   = Output(UInt(conf.xprlen.W))
-    val front = Flipped(new InterfaceIO(conf.xprlen))
+    val front = Flipped(new InterfaceIO)
   })
 
   val csr = Module(new CSRFile())
   io.cyc := csr.io.time(conf.xprlen-1,0)
-  val stateCtrl  = Module(new StateCtrl).io
-  stateCtrl.cyc := io.cyc
-  val frontQueue = Module(new FrontQueue).io
-  frontQueue.cyc := io.cyc
-  for (i <- 0 until nInst)
-    io.front.forward(i) := frontQueue.forward
-  frontQueue.in.inst := io.front.inst
-  frontQueue.in.pred := io.front.pred
-  frontQueue.in.pc_split   := io.front.pc_split
-  frontQueue.in.inst_split := io.front.inst_split
-  when (CycRange(io.cyc, 453, 454)) {
-    printf(p"eret ${csr.io.eret} " +
-      p"evec ${csr.io.evec} xcpt_valid " +
-      p"${stateCtrl.xcpt_o.valid} " +
-      p"xcpt_pc ${stateCtrl.xcpt_o.pc}\n")
-  }
-  frontQueue.xcpt.valid := csr.io.eret //stateCtrl.xcpt_o.valid
-  frontQueue.xcpt.bits  := csr.io.evec //stateCtrl.xcpt_o.pc
-  val instDecoder = Array.fill(nInst)(Module(new InstDecoder).io)
-  val in_valid = Wire(Vec(nInst, Bool()))
-  for (i <- 0 until nInst) {
-    in_valid(i) := frontQueue.inst(i).valid
-    instDecoder(i).inst := frontQueue.inst(i).bits
-  }
-  val in_wrb = (0 until nInst).map(i => in_valid(i) && instDecoder(i).rd.valid)
-  val in_mem = (0 until nInst).map(i => in_valid(i) && instDecoder(i).mem_en)
-  val in_pvl = (0 until nInst).map(i => in_valid(i) && instDecoder(i).privil)
-  val in_bjr = (0 until nInst).map(i => in_valid(i) && frontQueue.pred.brchjr(i))
 
-  stateCtrl.xcpt_i.valid := csr.io.eret //false.B
+  val instDecoder = Array.fill(nInst)(Module(new InstDecoder).io)
+  for (i <- 0 until nInst) {
+    instDecoder(i).inst := io.front.inst(i).bits
+  }
+  val in_wrb = (0 until nInst).map(i => io.front.inst(i).valid && instDecoder(i).rd.valid)
+  val in_mem = (0 until nInst).map(i => io.front.inst(i).valid && instDecoder(i).mem_en)
+  val in_pvl = (0 until nInst).map(i => io.front.inst(i).valid && instDecoder(i).privil)
+  val in_bjr = (0 until nInst).map(i => io.front.inst(i).valid && io.front.pred.brchjr(i))
+  val stateCtrl = Module(new StateCtrl).io
+  stateCtrl.cyc := io.cyc
+//  val xcpt_todo = false.B
+  stateCtrl.xcpt_i.valid := csr.io.eret
   stateCtrl.xcpt_i.id := Mux(in_pvl(0), stateCtrl.physic(0).id, stateCtrl.physic(1).id)
-  val loadStore  = Module(new LoadStore).io
+  val loadStore = Module(new LoadStore).io
   loadStore.cyc  := io.cyc
   loadStore.xcpt := stateCtrl.xcpt_o.valid
   loadStore.head := stateCtrl.head
@@ -61,9 +44,13 @@ class BackEnd(implicit conf: CPUConfig) extends Module with BackParam {
   branchJump.cyc := io.cyc
   branchJump.xcpt := stateCtrl.xcpt_o.valid
   branchJump.head := stateCtrl.head
-  frontQueue.kill.valid := branchJump.kill.valid
-  frontQueue.kill.bits  := branchJump.feedback.bits.tgt
-  io.front.kill := branchJump.kill.valid
+  /*TODO List
+  * optimizing exception recover procedure*/
+  io.front.xcpt.valid := csr.io.eret// || stateCtrl.xcpt_i.valid
+  io.front.xcpt.bits  := csr.io.evec
+//  io.front.xcpt.bits  := Mux(stateCtrl.xcpt_i.valid, stateCtrl.xcpt_o.pc, csr.io.evec)
+  io.front.kill.valid := branchJump.kill.valid
+  io.front.kill.bits  := branchJump.feedback.bits.tgt
 
   val inner_kill = RegInit({
     val w = Wire(new KillInfo(wOrder, nBrchjr))
@@ -73,14 +60,15 @@ class BackEnd(implicit conf: CPUConfig) extends Module with BackParam {
     w
   })
   val instQueue = Array.fill(nInst)(Module(new InstQueue).io)
-  inner_kill.valid := branchJump.kill.valid || (frontQueue.pred.split && instQueue(1).in.valid)
+  inner_kill.valid := branchJump.kill.valid || (io.front.pred.split && instQueue(1).in.valid)
   inner_kill.id    := Mux(branchJump.kill.valid, branchJump.kill.id + 1.U, stateCtrl.physic(1).id)
   inner_kill.bidx  := Mux(branchJump.kill.valid, branchJump.kill.bidx, OHToUInt(branchJump.bid1H))
   stateCtrl.kill   := inner_kill
-  stateCtrl.split  := RegNext(!branchJump.kill.valid && frontQueue.pred.split)
+  //along with kill info
+  stateCtrl.split  := RegNext(!branchJump.kill.valid && io.front.pred.split)
   stateCtrl.bidx1H := branchJump.bid1H
-  stateCtrl.bj_first := frontQueue.pred.brchjr(0)
-  val imm_fb = RegInit({
+  stateCtrl.bj_first := io.front.pred.brchjr(0)
+  val feedback = RegInit({
     val w = Wire(new Bundle {
       val valid = Bool()
       val redirect = Bool()
@@ -95,43 +83,33 @@ class BackEnd(implicit conf: CPUConfig) extends Module with BackParam {
     w.typ := DontCare
     w
   })
-  io.front.feedback.valid := branchJump.feedback.valid || imm_fb.valid
+  io.front.feedback.valid := feedback.valid
+  io.front.feedback.bits.redirect := feedback.valid && feedback.redirect
+  io.front.feedback.bits.tgt := feedback.tgt
+  io.front.fb_type := feedback.typ
+  io.front.fb_pc   := feedback.pc
 
-  io.front.feedback.bits.redirect := Mux(branchJump.feedback.valid,
-    branchJump.feedback.bits.redirect, imm_fb.valid && imm_fb.redirect)
-
-  io.front.feedback.bits.tgt := Mux(branchJump.feedback.valid,
-    branchJump.feedback.bits.tgt, imm_fb.tgt)
-
-  io.front.fb_type := Mux(branchJump.feedback.valid,
-    branchJump.fb_type, imm_fb.typ)
-
-  io.front.fb_pc := Mux(branchJump.feedback.valid,
-    branchJump.fb_pc, imm_fb.pc)
-
-  val in_fbk = (0 until nInst).map(i => Pulse(frontQueue.pred.rectify(i), frontQueue.inst(i).ready))
-  val in_fbk0 = frontQueue.pred.rectify(0)
-  when (in_fbk.reduce(_||_)) {
-    imm_fb.valid := true.B
-  }.elsewhen(!branchJump.feedback.valid) {
-    imm_fb.valid := false.B
-  }
-
-  when (in_fbk.reduce(_||_)) {
-    imm_fb.redirect := Mux(in_fbk0, frontQueue.pred.brchjr(0), frontQueue.pred.brchjr(1))
-    imm_fb.pc       := Mux(in_fbk0, frontQueue.pc(0), frontQueue.pc(1))
-
-    imm_fb.tgt := frontQueue.pred.tgt
-    imm_fb.typ := Mux(frontQueue.pred.branch && imm_fb.redirect, BTBType.branch.U, BTBType.jump.U)
+  val feedback_valid = (0 until nInst).map(i => Pulse(io.front.pred.rectify(i), io.front.inst(i).ready)).reduce(_||_)
+  feedback.valid := branchJump.feedback.valid || feedback_valid
+  when (branchJump.feedback.valid && (branchJump.kill.valid || !feedback_valid)) {
+    feedback.pc    := branchJump.fb_pc
+    feedback.tgt   := branchJump.feedback.bits.tgt
+    feedback.redirect := branchJump.feedback.bits.redirect
+    feedback.typ   := branchJump.fb_type
+  }.elsewhen(feedback_valid) {
+    feedback.pc    := Mux(io.front.pred.rectify(0), io.front.pc(0), io.front.pc(1))
+    feedback.tgt   := io.front.pred.tgt
+    feedback.redirect := io.front.pred.redirect
+    feedback.typ   := (io.front.pred.redirect && io.front.pred.branch).asUInt
   }
 
   for (i <- 0 until nInst) {
     stateCtrl.logic(i).rs := instDecoder(i).rs
     stateCtrl.logic(i).rd := instDecoder(i).rd
     stateCtrl.logic(i).op := instDecoder(i).op
-    stateCtrl.logic(i).pc := frontQueue.pc(i)
+    stateCtrl.logic(i).pc := io.front.pc(i)
   }
-  stateCtrl.first := in_valid(0)
+  stateCtrl.first := io.front.inst(0).valid
 
   val regfile = Module(new Regfile).io
   regfile.debug <> stateCtrl.what
@@ -166,7 +144,7 @@ class BackEnd(implicit conf: CPUConfig) extends Module with BackParam {
     in_inst(i).info.rd      := stateCtrl.physic(i).rd
     in_inst(i).info.f1      := instDecoder(i).op.cycle === CYC_1
     in_inst(i).info.imm     := instDecoder(i).imm
-    in_inst(i).info.branch  := frontQueue.pred.brchjr(i) && frontQueue.pred.branch
+    in_inst(i).info.branch  := io.front.pred.brchjr(i) && io.front.pred.branch
     in_inst(i).info.op1_sel := Mux(stateCtrl.physic(i).undef(0) &&
       instDecoder(i).op1_sel === OP1_RS1,  OP1_X , instDecoder(i).op1_sel)
     in_inst(i).info.op2_sel := Mux(stateCtrl.physic(i).undef(1) &&
@@ -176,7 +154,7 @@ class BackEnd(implicit conf: CPUConfig) extends Module with BackParam {
     instQueue(i).head := stateCtrl.head
     instQueue(i).kill.valid := inner_kill.valid
     instQueue(i).kill.bits  := inner_kill.id
-    instQueue(i).in.valid   := frontQueue.inst(i).fire && !inner_kill.valid
+    instQueue(i).in.valid   := io.front.inst(i).fire && !inner_kill.valid
     instQueue(i).in.bits    := in_inst(i)
     instQueue(i).issueable  := loadStore.issueable
     instQueue(i).bypass     := data_wb
@@ -187,7 +165,7 @@ class BackEnd(implicit conf: CPUConfig) extends Module with BackParam {
     stateCtrl.req_id(i) := ir_inst(i).id
 
     ir_data(i)(0) := Mux(ir_inst(i).info.op1_sel === OP1_IMZ, instDecoder(i).imm_z,
-      Mux(instQueue(i).issue.valid, stateCtrl.resp_pc(i), frontQueue.pc(i)))
+      Mux(instQueue(i).issue.valid, stateCtrl.resp_pc(i), io.front.pc(i)))
 
     ir_data(i)(1) := Mux(ir_inst(i).info.op2_sel === OP22_UTYPE,
       Cat(ir_inst(i).info.imm, ir_inst(i).rs(1).addr(7-wPhyAddr,0), ir_inst(i).rs(0).addr, 0.U(12.W)),
@@ -232,44 +210,45 @@ class BackEnd(implicit conf: CPUConfig) extends Module with BackParam {
   memory_cap(2) := !instDecoder(1).mem_en || loadStore.in(1).ready
   memory_cap(3) := memory_cap(0) && memory_cap(2)
 
-  branch_cap(0) := !frontQueue.pred.brchjr(0) || branchJump.in.ready
-  branch_cap(1) := !frontQueue.pred.brchjr(1) || branchJump.in.ready
-  branch_cap(2) := !frontQueue.pred.brchjr.reduce(_||_) || branchJump.in.ready
+  branch_cap(0) := !io.front.pred.brchjr(0) || branchJump.in.ready
+  branch_cap(1) := !io.front.pred.brchjr(1) || branchJump.in.ready
+  branch_cap(2) := !io.front.pred.brchjr.reduce(_||_) || branchJump.in.ready
 
   common(0) := branch_cap(0) && physic_cap(0) && memory_cap(0) && issue_cap(0)
   common(1) := branch_cap(1) && physic_cap(1) && memory_cap(1) && issue_cap(1)
   common(2) := branch_cap(1) && physic_cap(2) && memory_cap(2) && issue_cap(2)
   common(3) := branch_cap(2) && physic_cap(3) && memory_cap(3) && issue_cap(3)
 
-  frontQueue.inst(0).ready := common(0) && privil_cap(0)
-  frontQueue.inst(1).ready := Mux(in_valid(0),
+  io.front.inst(0).ready := common(0) && privil_cap(0)
+  io.front.inst(1).ready := Mux(io.front.inst(0).valid,
     common(3) && !instDecoder(0).privil, common(1)) && privil_cap(1)
-  stateCtrl.inc_order(0) := Mux(in_valid(0),   common(0) && privil_cap(0),
-                                in_valid(1) && common(1) && privil_cap(1))
-  stateCtrl.inc_order(1) := in_valid.reduce(_&&_) && common(2) && privil_cap(1) && !instDecoder(0).privil
+  stateCtrl.inc_order(0) := Mux(io.front.inst(0).valid,   common(0) && privil_cap(0),
+                                io.front.inst(1).valid && common(1) && privil_cap(1))
+
+  stateCtrl.inc_order(1) := io.front.inst.map(_.valid).reduce(_&&_) && common(2) && privil_cap(1) && !instDecoder(0).privil
   stateCtrl.wrb_valid(0) := in_wrb(0) && privil_cap(0) && issue_cap(0) && memory_cap(0) && branch_cap(0)
-  stateCtrl.wrb_valid(1) := in_wrb(1) && privil_cap(1) && Mux(in_valid(0),
+  stateCtrl.wrb_valid(1) := in_wrb(1) && privil_cap(1) && Mux(io.front.inst(0).valid,
     issue_cap(3) && memory_cap(3) && branch_cap(2) && !instDecoder(0).privil,
     issue_cap(1) && memory_cap(1) && branch_cap(1))
   stateCtrl.bjr_valid := branchJump.in.ready &&
-    Mux(in_bjr(0), issue_cap(0) && physic_cap(0), in_bjr(1) && Mux(in_valid(0),
+    Mux(in_bjr(0), issue_cap(0) && physic_cap(0), in_bjr(1) && Mux(io.front.inst(0).valid,
       issue_cap(3) && physic_cap(3) && memory_cap(0) && !instDecoder(0).privil,
       issue_cap(1) && physic_cap(1)))
 
-  branchJump.in.valid := stateCtrl.bjr_valid && !frontQueue.pred.is_jal
+  branchJump.in.valid := stateCtrl.bjr_valid && !io.front.pred.is_jal
   loadStore.in(0).valid  := in_mem(0) && issue_cap(0) && physic_cap(0)
-  loadStore.in(1).valid  := in_mem(1) && Mux(in_valid(0),
+  loadStore.in(1).valid  := in_mem(1) && Mux(io.front.inst(0).valid,
     issue_cap(3) && physic_cap(3) && branch_cap(0) && !instDecoder(0).privil,
     issue_cap(1) && physic_cap(1))
 
   stateCtrl.br_commit := branchJump.commit
   branchJump.in.bits.id := Mux(in_bjr(0), stateCtrl.physic(0).id, stateCtrl.physic(1).id)
-  branchJump.in.bits.pc := Mux(in_bjr(0), frontQueue.pc(0), frontQueue.pc(1))
+  branchJump.in.bits.pc := Mux(in_bjr(0), io.front.pc(0), io.front.pc(1))
   branchJump.in.bits.brtype := Mux(in_bjr(0), instDecoder(0).br_type, instDecoder(1).br_type)
   branchJump.in.bits.cont := branchJump.in.bits.pc + 4.U
-  branchJump.in.bits.branch := frontQueue.pred.branch
-  branchJump.in.bits.redirect := frontQueue.pred.redirect
-  branchJump.in.bits.tgt := frontQueue.pred.tgt
+  branchJump.in.bits.branch := io.front.pred.branch
+  branchJump.in.bits.redirect := io.front.pred.redirect
+  branchJump.in.bits.tgt := io.front.pred.tgt
 
   loadStore.kill.valid := inner_kill.valid
   loadStore.kill.bits  := inner_kill.id
@@ -290,13 +269,6 @@ class BackEnd(implicit conf: CPUConfig) extends Module with BackParam {
     in_mem(0) && instDecoder(0).mem_fcn === M_XRD,
     in_mem(0) && instDecoder(0).mem_fcn === M_XWR)
   /*========================================================================================*/
-
-  io.front.xcpt.valid := csr.io.eret
-  io.front.xcpt.bits  := csr.io.evec
-  csr.io.retire := stateCtrl.retire
-  // Add your own uarch counters here!
-  csr.io.counters.foreach(_.inc := false.B)
-
   val exe_reg_issue  = RegInit(VecInit(Seq.fill(nInst){
     val w = Wire(new ExeIssueI(wOrder, wPhyAddr, nCommit, data_width))
     w.valid    := false.B
@@ -472,9 +444,13 @@ class BackEnd(implicit conf: CPUConfig) extends Module with BackParam {
     Mux(in_pvl(1) && stateCtrl.empty, instDecoder(1).csr_cmd, CSR.N))
 
   exe_reg_csr := in_pvl(0)
-  exe_reg_csr_addr := Mux(in_pvl(0), frontQueue.inst(0).bits(CSR_ADDR_MSB, CSR_ADDR_LSB),
-    frontQueue.inst(1).bits(CSR_ADDR_MSB, CSR_ADDR_LSB))
+  exe_reg_csr_addr := Mux(in_pvl(0), io.front.inst(0).bits(CSR_ADDR_MSB, CSR_ADDR_LSB),
+    io.front.inst(1).bits(CSR_ADDR_MSB, CSR_ADDR_LSB))
+
   csr.io := DontCare
+  csr.io.retire := stateCtrl.retire
+  // Add your own uarch counters here!
+  csr.io.counters.foreach(_.inc := false.B)
   csr.io.rw.addr  := exe_reg_csr_addr
   csr.io.rw.wdata := Mux(exe_reg_csr, alu(0).result, alu(1).result)
   csr.io.rw.cmd   := exe_reg_csr_cmd
@@ -493,14 +469,14 @@ class BackEnd(implicit conf: CPUConfig) extends Module with BackParam {
   for (i <- 0 until nInst) {
     printf("Core: Cyc= %d pc %x pair<%x %x> id %d rd %x:%x->%x rs [%x:%x->%x %x:%x->%x] inst: DASM(%x)\n",
       io.cyc,
-      frontQueue.pc(i),
-      frontQueue.inst(i).valid,
-      frontQueue.inst(i).ready,
+      io.front.pc(i),
+      io.front.inst(i).valid,
+      io.front.inst(i).ready,
       stateCtrl.physic(i).id,
       stateCtrl.physic(i).rd.valid, stateCtrl.logic(i).rd.addr, stateCtrl.physic(i).rd.addr,
       stateCtrl.physic(i).rs(0).valid, stateCtrl.logic(i).rs(0).addr, stateCtrl.physic(i).rs(0).addr,
       stateCtrl.physic(i).rs(1).valid, stateCtrl.logic(i).rs(1).addr, stateCtrl.physic(i).rs(1).addr,
-      Mux(instQueue(i).in.valid, frontQueue.inst(i).bits, BUBBLE))
+      Mux(instQueue(i).in.valid, io.front.inst(i).bits, BUBBLE))
   }
 
   when (CycRange(io.cyc, 34, 34)) {

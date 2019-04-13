@@ -102,7 +102,7 @@ class BranchJump extends Module with BjParam {
     /*forward inst id*/
     def fwd_id: UInt = Mux(pop_valid, pop_issue.id, Mux1H(order, issue_id))
     /*forward direction result*/
-    def fwd_actual: Bool = Mux(pop_valid, pop_issue.actual || !pop_issue.branch, wire_actual && branch_acc)
+    def fwd_actual: Bool = Mux(pop_valid, pop_issue.actual || !pop_issue.branch, wire_actual)
     /*forward target*/
     def fwd_tgt: UInt = Mux(Mux(pop_valid, pop_issue.actual, wire_actual), pop_entry.tgt, fwd_target)
     /*forward kill signal*/

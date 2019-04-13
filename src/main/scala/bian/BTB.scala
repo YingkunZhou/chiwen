@@ -19,9 +19,11 @@ object BTBType {
   //  val retn    = 1
   //  val branch  = 2
   //  val jump    = 3
-  val branch  = 0
-  val jump    = 1
-  val NUM = jump + 1
+  val jump    = 0
+  val branch  = 1
+  require(branch == 1)
+  val NUM = branch + 1
+  require(NUM == 2)
   val SZ = log2Ceil(NUM)
 }
 
