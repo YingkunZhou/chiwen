@@ -110,7 +110,7 @@ class StateCtrl extends Module with BackParam {
     val req_io  = Vec(nALU, new OpReqIO(wOrder))
     val req_id  = Input(Vec(nInst, UInt(wOrder.W)))
     val resp_pc = Output(Vec(nInst, UInt(data_width.W)))
-    val retire = Output(UInt(3.W))
+    val retire  = Output(UInt(3.W))
 
     val cyc = Input(UInt(data_width.W))
     val what = Vec(nCommit, Flipped(new ReadIO(data_width, wPhyAddr)))
@@ -216,15 +216,15 @@ class StateCtrl extends Module with BackParam {
       )
     }
   }
-  when (CycRange(io.cyc, 34, 36)) {
+  when (CycRange(io.cyc, 715, 717)) {
     printf(
 //      p"commit_31 ${reorder.commit(31)} " +
 //      p"commit_0 ${reorder.commit(0)} " +
 //      p"t1->${latest.maptb(6)} " +
 //      p"using->${latest.useing(4)} " +
 //      p"split->${io.split} " +
-      p"io.commit5 ${io.commit(1)} " +
-      p"commit5 ${reorder.commit(5)} " +
+//      p"io.commit5 ${io.commit(1)} " +
+//      p"commit5 ${reorder.commit(5)} " +
       p"tail ${reorder.tail(0)} " +
       p"tail_val ${reorder.tail_val0} " +
       p"id_ready0 ${io.id_ready} " +

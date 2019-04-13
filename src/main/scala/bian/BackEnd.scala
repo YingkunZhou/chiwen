@@ -465,7 +465,6 @@ class BackEnd(implicit conf: CPUConfig) extends Module with BackParam {
   issueQueue(ALU3).in.bits  := Mux(sel_ALU1, issueQueue(0).in.bits, issueQueue(1).in.bits)
   issueQueue(ALU3).in.bits.valid := Mux(sel_ALU1, ALU3_valid(0), ALU3_valid(1))
 
-
   val exe_reg_csr = Reg(Bool())
   val exe_reg_csr_cmd  = RegInit(CSR.N)
   val exe_reg_csr_addr = Reg(UInt((CSR_ADDR_MSB-CSR_ADDR_LSB+1).W))

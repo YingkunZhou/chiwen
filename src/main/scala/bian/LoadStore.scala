@@ -34,8 +34,9 @@ class QueuePriority(val nEntry: Int) extends Bundle {
 }
 class QueueBackward(nEntry: Int) extends QueuePriority(nEntry) {
   def ptr(continue: Bool, head: Bool, above: UInt, below: UInt): UInt = //TODO
-    PriorityEncoder(Mux(continue || (above & const).orR,
-      Cat(head, above & const), Cat(!head, below & const)))
+    Mux(continue || (above & const).orR,
+      Cat( head, PriorityEncoder(above & const)),
+      Cat(!head, PriorityEncoder(below & const)))
   def ptr(continue: Bool, above: UInt, below: UInt): UInt = //TODO
     PriorityEncoder(Mux(continue || (above & const).orR, above & const, below & const))
 }
@@ -207,12 +208,17 @@ class LoadStore extends Module with LsParam {
     val cyc = Input(UInt(data_width.W))
   })
   /*TODO List:
-  * 1. need to accelerate rollback time???*/
+  * 1. need to accelerate rollback time???
+  * 2. optimized following sequence instruction flow
+  *    inst: sw      ra, 4(sp)
+  *    inst: lw      t5, 4(sp)
+  * 3. if full bypass load, let it go no need to wait for memory data back
+  * */
   def next(ptr: UInt, n: Int, inc: Int): UInt = {
     require(inc < 3)
     if (isPow2(n)) ptr + inc.U
     else { require(n == 6)
-      if (inc == 1) Mux(ptr === (n-1).U, Cat(!ptr(3), 0.U(3.W)), ptr+1.U)
+      if (inc == 1) Mux(ptr(2,0) === (n-1).U, Cat(!ptr(3), 0.U(3.W)), ptr+1.U)
       else Mux(ptr(2).toBool, Cat(!ptr(3), 0.U(1.W), ptr(1,0)), ptr+2.U)
     }
   }
@@ -595,7 +601,7 @@ class LoadStore extends Module with LsParam {
 
   store_ctrl.inc_head  := mem.store && io.mem.req.ready
   io.stcommit.valid := store_ctrl.inc_head
-  io.stcommit.bits  := store_queue.head_id
+  io.stcommit.bits  := io.head
 
   io.mem.req.bits.data := store_queue.head_data
   io.mem.req.bits.fcn := Mux(mem.store, M_XWR, M_XRD)
@@ -609,14 +615,30 @@ class LoadStore extends Module with LsParam {
   io.mem.req.bits.addr:= Mux(mem.store, store_queue.head_addr,
     Mux(mem.fwd_stall, mem_reg.ld_addr, Mux(mem.fwd_fcn === M_XWR, store_queue.addr, load_queue.addr)))
 
-  when (CycRange(io.cyc, 746, 764)) {
-    printf(p"LoadStore input: valid ${io.in(0).valid} ${io.in(1).valid} " +
-      p"loadq ${load_queue.head} " +
-      p"${load_queue.tail} " +
-      p"Storeq ${store_queue.head}" +
-      p"${store_queue.tail}" +
-      p"ldstq ${queue.head}" +
+  when (CycRange(io.cyc, 657, 665)) {
+    printf(p"store: head ${store_queue.head} tail ${store_queue.tail} id")
+    for (i <- 0 until nStore) printf(p" ${store_queue.ls_id(i)}")
+    printf("\n")
+    printf(
+      p"kill valid ${io.kill.valid} " +
+      p"kill id ${io.kill.bits} " +
+      p"kill cmp${VecInit(store_ctrl.kill.const)} " +
+      p"${store_ctrl.kill_ptr} " +
+      p"${store_ctrl.kill.valid(store_queue.valid)} " +
+      p"${VecInit(store_queue.valid)}\n")
+  }
+  when (CycRange(io.cyc, 657, 665)) {
+    printf(p"LoadStore input: " +
+      p"valid ${io.in(0).valid} ${io.in(1).valid} " +
+      p"head ${io.head} " +
+      p"req_ready ${io.mem.req.ready} " +
+      p"head_id ${store_queue.head_id} " +
+      p"store ${mem.store} " +
+      p"ldstq ${queue.head} " +
       p"${queue.tail} \n")
+    printf(p"load: head ${load_queue.head} tail ${load_queue.tail} id")
+    for (i <- 0 until nLoad) printf(p" ${load_queue.ls_id(i)}")
+    printf("\n")
   }
 //  printf(p"output: ready->Vec(${io.in(0).ready}, ${io.in(1).ready}) isseable->${io.issueable.valid}:" +
 //    p"${io.issueable.bits} forward->${io.forward.valid}:${io.forward.addr}\n" +

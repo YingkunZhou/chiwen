@@ -193,7 +193,9 @@ class BranchJump extends Module with BjParam {
 
   bj_ctrl.tail := bj_reg.count - 1.U //no need to update bj_count using combi logic
   when (io.xcpt) {bj_reg.count := 0.U
-  }.elsewhen(bj_reg.fwd_kill) {bj_reg.count := bj_reg.fwd_ptr
+  }.elsewhen(bj_reg.fwd_kill) {
+    when (bj_ctrl.forward) { bj_reg.count := bj_reg.fwd_ptr - 1.U
+    }.otherwise { bj_reg.count := bj_reg.fwd_ptr }
   }.otherwise {
     when (io.in.valid && !bj_ctrl.forward) {bj_reg.count := bj_reg.count + 1.U}
     when (!io.in.valid && bj_ctrl.forward) {bj_reg.count := bj_ctrl.tail}
@@ -248,22 +250,28 @@ class BranchJump extends Module with BjParam {
 
   for (i <- 0 until nEntry) {
     bj_ctrl.update(i) := (0 until 3).map(j => io.issue(j).valid && io.mask(j) && bj_ctrl.queue_idcam(j)(i)).reduce(_||_)
-    bj_ctrl.actual(i) := (0 until 3).map(j => io.issue(j).actual && bj_ctrl.queue_idcam(j)(i)).reduce(_||_)
+    bj_ctrl.actual(i) := (0 until 3).map(j => io.issue(j).valid && io.issue(j).actual && bj_ctrl.queue_idcam(j)(i)).reduce(_||_)
     for (j <- 0 until 3) {
       when (io.issue(j).valid && bj_ctrl.table_idcam(j)(i) &&
         !io.issue(j).branch) {cd_link(i) := io.target(j)}
     }
   }
 
-  when (CycRange(io.cyc, 122, 127)) {
-//    for (i <- 0 until 3) {
-//      printf(
-//        p"issue valid ${io.issue(i).valid} " +
-//          p"branch ${io.issue(i).branch} " +
-//          p"actual ${io.issue(i).actual} " +
-//          p"brtype ${io.brtype(i)} " +
-//          p"hit ${bj_ctrl.valid(i)}\n")
-//    }
+  when (CycRange(io.cyc, 715, 720)) {
+    printf(p"pop_valid ${bj_ctrl.pop_valid} " +
+      p"pop_issue ${bj_ctrl.pop_issue}" +
+      p"pop_expect ${bj_ctrl.pop_entry.expect} " +
+      p"actual_vec ${bj_ctrl.actual} " +
+      p"\n")
+    for (i <- 0 until 3) {
+      printf(
+        p"issue valid ${io.issue(i).valid} " +
+          p"id ${io.issue(i).id} " +
+          p"branch ${io.issue(i).branch} " +
+          p"actual ${io.issue(i).actual} " +
+          p"brtype ${io.brtype(i)} " +
+          p"hit ${bj_ctrl.valid(i)}\n")
+    }
 //    printf(p"output: " +
 //      p"ready->${io.in.ready} " +
 //      p"bid1H->${io.bid1H} " +
@@ -280,25 +288,23 @@ class BranchJump extends Module with BjParam {
 //      p"commit_val->${io.commit.valid} " +
 //      p"commit_id->${io.commit.bits}\n")
 //
-    printf(p"output: mask->Vec(${io.mask(0)}, ${io.mask(1)}, ${io.mask(2)}) " +
+//    printf(p"output: mask->Vec(${io.mask(0)}, ${io.mask(1)}, ${io.mask(2)}) " +
 //      p"br_type->Vec(${io.brtype(0)}, ${io.brtype(1)}, ${io.brtype(2)}) " +
-      p"cd_link->${io.cdlink(0)}" +
-      p"\n")
+//      p"cd_link->${io.cdlink(0)}" +
+//      p"\n")
 //    printf(p"bj_ctrl: update->${bj_ctrl.update} actual->${bj_ctrl.actual} forward->${bj_ctrl.forward} tail->${bj_ctrl.tail} " +
 //      p"fwd_ptr->${bj_ctrl.fwd_ptr} fwd_kill->${bj_ctrl.fwd_kill}\n")
-    val queue_id     = Wire(Vec(nEntry, UInt()))
-    val queue_val    = Wire(Vec(nEntry, Bool()))
-    val queue_actual = Wire(Vec(nEntry, Bool()))
-    val queue_branch = Wire(Vec(nEntry, Bool()))
-    queue_id     := bj_queue.map(_.id)
-    queue_val    := bj_queue.map(_.valid)
-    queue_actual := bj_queue.map(_.actual)
-    queue_branch := bj_queue.map(_.branch)
-    printf(p"fwd_kill ${bj_reg.fwd_kill} in_valid ${io.in.valid} " +
-      p"fwd_id ${bj_reg.fwd_id} head_id ${bj_ctrl.head_id}\n")
-    printf(p"table_valid: Vec(${bj_valid(0).valid}->${bj_valid(0).bits} ${bj_valid(1).valid}->${bj_valid(1).bits} " +
-      p"${bj_valid(2).valid}->${bj_valid(2).bits} ${bj_valid(3).valid}->${bj_valid(3).bits})\n")
-    printf(p"counter: ${bj_reg.count} queue: id->$queue_id valid->$queue_val actual->$queue_actual branch->$queue_branch\n")
+    printf(
+      p" in_valid ${io.in.valid} " +
+      p"forward ${bj_reg.forward} " +
+      p"fwd_kill ${bj_reg.fwd_kill} " +
+      p"fwd_id ${bj_reg.fwd_id} " +
+      p"head_id ${bj_ctrl.head_id} ")
+    printf(p"counter: ${bj_reg.count} table_valid:")
+    for (i <- 0 until nEntry) printf(p" ${bj_valid(i).valid}->${bj_valid(i).bits}")
+    printf(p" queue:")
+    for (i <- 0 until nEntry) printf(p" ${bj_queue(i).valid}->${bj_queue(i).id}")
+    printf("\n")
   }
 
 //  val cnt = RegInit(0.U(32.W))
