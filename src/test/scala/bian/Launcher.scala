@@ -34,7 +34,7 @@ object Launcher {
       }
     },
     "IssueQueue" -> {manager: TesterOptionsManager =>
-      Driver.execute(() => new IssueQueue(4), manager) {
+      Driver.execute(() => new IssueQueue(4,1), manager) {
         c => new IssueQTest(c)
       }
     },

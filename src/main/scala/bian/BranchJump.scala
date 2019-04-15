@@ -146,8 +146,8 @@ class BranchJump extends Module with BjParam {
     w.fwd_bidx := DontCare
     w
   })
-  bj_reg.forward  := bj_ctrl.forward
-  bj_reg.fwd_kill := bj_ctrl.fwd_kill
+  bj_reg.forward  := bj_ctrl.forward && !io.xcpt //TODO
+  bj_reg.fwd_kill := bj_ctrl.fwd_kill && !io.xcpt
   bj_reg.fwd_id   := bj_ctrl.fwd_id
   bj_reg.fwd_ptr  := bj_ctrl.fwd_ptr
   bj_reg.fwd_bidx := bj_ctrl.fwd_bidx
@@ -257,7 +257,7 @@ class BranchJump extends Module with BjParam {
     }
   }
 
-  when (CycRange(io.cyc, 715, 720)) {
+  when (CycRange(io.cyc, 13700, 13742)) {
     printf(p"pop_valid ${bj_ctrl.pop_valid} " +
       p"pop_issue ${bj_ctrl.pop_issue}" +
       p"pop_expect ${bj_ctrl.pop_entry.expect} " +

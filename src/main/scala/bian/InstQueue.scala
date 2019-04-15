@@ -239,8 +239,8 @@ class InstQueue extends Module with InstParam {
       when (io.xcpt) {
         queue_valid(i) := false.B
       }.elsewhen(inst_ctrl.issue_stall) {
-        when(touch_count(i)) {
-          queue_valid(i) := io.in.valid
+        when(touch_count(i) && io.in.valid) {
+          queue_valid(i) := true.B
         }.otherwise {
           queue_valid(i) := inst_ctrl.kill.survive(i)
         }

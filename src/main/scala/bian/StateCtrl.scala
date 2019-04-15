@@ -245,7 +245,7 @@ class StateCtrl extends Module with BackParam {
     order_ctrl.inc_head(i) := reorder.head_val(i) && !xcpt_ctrl.flush(i) && !order_ctrl.kill(i)
     order_ctrl.commited(i) := (0 until i+1).map(j => order_ctrl.inc_head(j)).reduce(_&&_) // about 12~16 gates
   }
-  io.retire := PopCount(order_ctrl.commited)
+  io.retire := PopCount(order_ctrl.commited) + RegNext(io.st_commit.valid).asUInt
   order_ctrl.next_head := reorder.head.map(_ + nCommit.U)
   when (order_ctrl.inc_head(0)) {
     when (order_ctrl.inc_head(1)) { when (order_ctrl.inc_head(2)) { when (order_ctrl.inc_head(3)) {
@@ -256,6 +256,8 @@ class StateCtrl extends Module with BackParam {
       reorder.head := Seq(reorder.head(2), reorder.head(3), order_ctrl.next_head(0), order_ctrl.next_head(1)) }
     }.otherwise {
       reorder.head := Seq(reorder.head(1), reorder.head(2), reorder.head(3), order_ctrl.next_head(0)) }
+  }.elsewhen(io.st_commit.valid) { //TODO: figure out why the former will stall the CPU execution
+    reorder.head := Seq(reorder.head(1), reorder.head(2), reorder.head(3), order_ctrl.next_head(0))
   }
 
   order_ctrl.next_tail := reorder.tail.map(_ + nInst.U)
@@ -273,8 +275,8 @@ class StateCtrl extends Module with BackParam {
   //around 24 gates
   order_ctrl.retiring := (0 until nCommit).map(i =>
      Fill(nOrder, io.commit(i).valid) & UIntToOH(io.commit(i).id(wOrder-2,0))).reduce(_|_) |
-    (Fill(nOrder, io.br_commit.valid) & UIntToOH(io.br_commit.bits(wOrder-2,0))) |
-    (Fill(nOrder, io.st_commit.valid) & UIntToOH(io.st_commit.bits(wOrder-2,0)))
+    (Fill(nOrder, io.br_commit.valid) & UIntToOH(io.br_commit.bits(wOrder-2,0))) //|
+//    (Fill(nOrder, io.st_commit.valid) & UIntToOH(io.st_commit.bits(wOrder-2,0)))
 
   order_ctrl.register := Mux(io.inc_order(0), UIntToOH(reorder.tail(0)(wOrder-2,0)) |
     Mux(io.inc_order(1), UIntToOH(reorder.tail(1)(wOrder-2,0)), 0.U), 0.U)
@@ -494,8 +496,7 @@ class StateCtrl extends Module with BackParam {
   io.phy_ready(0) := phy_ready(0)
   io.phy_ready(1) := Mux(io.logic(0).rd.valid, phy_ready(1), phy_ready(0))
   io.id_ready(0)  := reorder.tail_val0 ||  reorder.head_val(0)
-  io.id_ready(1)  := reorder.tail_val1 || (reorder.head_val(0) &&
-    (reorder.tail_val0 || reorder.head_val(1)))
+  io.id_ready(1)  := Mux(reorder.head_val(0), reorder.tail_val0 || reorder.head_val(1), reorder.tail_val1)
 
 //  printf(
 //    p"phy_ready ${io.phy_ready} " +

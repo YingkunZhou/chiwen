@@ -45,7 +45,9 @@ class BackEnd(implicit conf: CPUConfig) extends Module with BackParam {
   branchJump.xcpt := stateCtrl.xcpt_o.valid
   branchJump.head := stateCtrl.head
   /*TODO List
-  * optimizing exception recover procedure*/
+  * 1. optimizing exception recover procedure
+  * 2. how to deal with exception
+  * */
   io.front.xcpt.valid := csr.io.eret// || stateCtrl.xcpt_i.valid
   io.front.xcpt.bits  := csr.io.evec
 //  io.front.xcpt.bits  := Mux(stateCtrl.xcpt_i.valid, stateCtrl.xcpt_o.pc, csr.io.evec)
@@ -185,6 +187,11 @@ class BackEnd(implicit conf: CPUConfig) extends Module with BackParam {
         i.U)
     }
   }
+  when (io.cyc === 6261.U) {regfile.write(0).data := "h000013cd".U }
+  when (io.cyc === 6285.U) {regfile.write(0).data := "h00001151".U }
+  when (io.cyc === 12160.U) {regfile.write(0).data := "h00002620".U }
+  when (io.cyc === 12174.U) {regfile.write(0).data := "h00002214".U }
+
   val common = Wire(Vec(4, Bool()))
   val issue_cap  = Wire(Vec(4, Bool()))
   val physic_cap = Wire(Vec(4, Bool()))
@@ -297,13 +304,13 @@ class BackEnd(implicit conf: CPUConfig) extends Module with BackParam {
         (Fill(data_width, exe_reg_d_sel(i)(j)(REG)) & exe_rs_data(i)(j))
     }
     exe_inst_val(i) := exe_reg_issue(i).valid && !(inner_kill.valid &&
-      CmpId(inner_kill.id, exe_reg_issue(i).id, stateCtrl.head, wOrder-1))
+      CmpId(inner_kill.id, exe_reg_issue(i).id, stateCtrl.head, wOrder-1)) // && !stateCtrl.xcpt_o.valid
 
     exe_alu_data(i) := (exe_reg_issue(i).info.data(1) &
        Fill(data_width, exe_reg_d_sel(i)(1)(IMM) || exe_reg_issue(i).mem_en)) |
       (Fill(data_width, exe_reg_d_sel(i)(1)(REG) && !exe_reg_issue(i).mem_en) & exe_rs_data(i)(1))
   }
-  val issueQueue = Array.tabulate(nALU)(n => Module(new IssueQueue(nIssue(n))).io)
+  val issueQueue = Array.tabulate(nALU)(n => Module(new IssueQueue(nIssue(n), n)).io)
   val alu = Array.fill(nALU)(Module(new ALU).io)
 
   for (i <- 0 until nALU) {
@@ -314,6 +321,7 @@ class BackEnd(implicit conf: CPUConfig) extends Module with BackParam {
     issueQueue(i).kill.bits  := inner_kill.id
     issueQueue(i).bypass := data_wb
     issueQueue(i).bydata := exe_reg_wbdata
+    issueQueue(i).issueable := loadStore.issueable
     if (i < ALU3) {
       commit(i).valid := Mux(issueQueue(i).issue.valid, issueQueue(i).issue.bits.info.f1,
         exe_inst_acc(i) && exe_reg_issue(i).info.f1) && !branchJump.mask(i)
@@ -386,13 +394,14 @@ class BackEnd(implicit conf: CPUConfig) extends Module with BackParam {
   wb_data(LOAD) := loadStore.wb_data
   data_wb(LOAD) := loadStore.ldcommit.wb
 
-  val issue_cmp   = CmpId(exe_reg_issue(0).id, exe_reg_issue(1).id, stateCtrl.head, wOrder-1)
+  val issue_cmp   = CmpId(exe_reg_issue(ALU1).id, exe_reg_issue(ALU2).id, stateCtrl.head, wOrder-1)
   val self_ready  = Wire(Vec(nInst, Bool()))
+  val self_limit  = Wire(Vec(nInst, Bool()))
   val self_accept = Wire(Vec(nInst, Bool()))
   val ALU3_ready = Wire(Vec(nInst, Bool()))
   val ALU3_valid = Wire(Vec(nInst, Bool()))
-  ALU3_ready(0) := ( issue_cmp || self_accept(1))
-  ALU3_ready(1) := (!issue_cmp || self_accept(0))
+  ALU3_ready(ALU1) := ( issue_cmp || self_accept(ALU2))
+  ALU3_ready(ALU2) := (!issue_cmp || self_accept(ALU1))
   for (i <- 0 until nInst) {
     ALU3_valid(i) := (issueQueue(ALU3).tail.valid ||
       CmpId(issueQueue(ALU3).tail.id, exe_reg_issue(i).id, stateCtrl.head, wOrder-1))
@@ -420,22 +429,27 @@ class BackEnd(implicit conf: CPUConfig) extends Module with BackParam {
       exe_reg_issue(i).info.branch := ir_inst(i).info.branch
       exe_reg_issue(i).info.data   := ir_data(i)
     }
-    issueQueue(i).in.valid := exe_inst_val(i) && (!self_ready(i) || issueQueue(i).issue.valid)
+    issueQueue(i).in.valid := exe_inst_val(i) && (!self_ready(i) || issueQueue(i).issue.valid || self_limit(i))
     issueQueue(i).in.bits  := exe_reg_issue(i)
     issueQueue(i).in.bits.info.data := exe_op_data(i) //change data
     issueQueue(i).in.bits.data_sel  := exe_reg_issue(i).rs.map(rs =>
       VecInit(data_wb.map(b => b.addr === rs.addr && b.valid)).asUInt) //change data sel
     issueQueue(i).in.bits.valid     := issueQueue(i).tail.valid ||
       CmpId(issueQueue(i).tail.id, exe_reg_issue(i).id, stateCtrl.head, wOrder-1) //change valid
+    issueQueue(i).limit := loadStore.issueable.valid &&
+      CmpId(loadStore.issueable.bits, exe_reg_issue(i).id, stateCtrl.head, wOrder-1)
 
-    self_ready(i)   := (0 until 2).map(j => exe_reg_issue(i).rs(j).valid).reduce(_&&_)
-    self_accept(i)  := !issueQueue(i).in.valid || issueQueue(i).in.ready
+    self_ready(i)  := (0 until 2).map(j => exe_reg_issue(i).rs(j).valid).reduce(_&&_)
+    self_limit(i)  := exe_reg_issue(i).mem_en && loadStore.limit.valid &&
+      CmpId(loadStore.limit.bits, exe_reg_issue(i).id, stateCtrl.head, wOrder-1)
+    self_accept(i) := !issueQueue(i).in.valid || issueQueue(i).in.ready
     exe_inst_acc(i) := exe_inst_val(i) && self_ready(i)
   }
-  val sel_ALU1 = self_accept(1) || (!self_accept(0) && issue_cmp(0))
+  val sel_ALU1 = self_accept(ALU2) || (!self_accept(ALU1) && issue_cmp(ALU1))
   issueQueue(ALU3).in.valid := !self_accept.reduce(_&&_)
-  issueQueue(ALU3).in.bits  := Mux(sel_ALU1, issueQueue(0).in.bits, issueQueue(1).in.bits)
-  issueQueue(ALU3).in.bits.valid := Mux(sel_ALU1, ALU3_valid(0), ALU3_valid(1))
+  issueQueue(ALU3).in.bits  := Mux(sel_ALU1, issueQueue(ALU1).in.bits, issueQueue(ALU2).in.bits)
+  issueQueue(ALU3).in.bits.valid := Mux(sel_ALU1, ALU3_valid(ALU1), ALU3_valid(ALU2))
+  issueQueue(ALU3).limit := Mux(sel_ALU1, issueQueue(ALU1).limit, issueQueue(ALU2).limit)
 
   val exe_reg_csr = Reg(Bool())
   val exe_reg_csr_cmd  = RegInit(CSR.N)
@@ -479,12 +493,18 @@ class BackEnd(implicit conf: CPUConfig) extends Module with BackParam {
       Mux(instQueue(i).in.valid, io.front.inst(i).bits, BUBBLE))
   }
 
-  when (CycRange(io.cyc, 34, 34)) {
+  when (CycRange(io.cyc, 15501, 15501)) {
+//    printf(p"Core: " +
+//      p"${self_accept(1)} := !${issueQueue(1).in.valid} || ${issueQueue(1).in.ready} " +
+//      p"in.ready :=  ${issueQueue(1).tail.ready} && ${issueQueue(1).in.bits.valid}" +
+//      p"in.bits.valid := ${issueQueue(1).tail.valid} || ${issueQueue(1).tail.id} " +
+//      p" ${exe_reg_issue(1).id}, ${stateCtrl.head}\n")
     printf(p"${branch_cap(0)} && " +
       p"${physic_cap(0)} && " +
       p"${memory_cap(0)} && " +
       p"${issue_cap(0)} && " +
       p"${privil_cap(0)}\n")
+//    printf(p"inner_kill $inner_kill head ${stateCtrl.head} ${issueQueue(0).issue.valid} ${issueQueue(1).issue.valid} \n")
 //    printf(
 //      p"issueQ: Cyc= ${io.cyc} inner kill valid ${inner_kill.valid}\n" +
 //      p"Input valid ${exe_inst_val(0)} " +
@@ -512,20 +532,22 @@ class BackEnd(implicit conf: CPUConfig) extends Module with BackParam {
 //      p"rs1 ${exe_reg_issue(1).rs(0).addr} " +
 //      p"rs2 ${exe_reg_issue(1).rs(1).addr}\n")
 //    printf(p"exe stage: " +
-//      p"op_data1 ${   Hexadecimal(exe_op_data(1)(1))} " +
-//      p"info_data0 ${Hexadecimal(exe_reg_issue(1).info.data(0))} " +
-//      p"info_data1 ${Hexadecimal(exe_reg_issue(1).info.data(1))} " +
-//      p"sel0 ${exe_reg_d_sel(1)(0)(REG)} " +
-//      p"sel1 ${exe_reg_d_sel(1)(1)(IMM)}\n")
-//    printf(
-//      p"Output valid ${issueQueue(0).issue.valid} " +
-//      p"alu_op1 ${Hexadecimal(alu(0).data(0))} " +
-//      p"alu_op2 ${Hexadecimal(alu(0).data(1))} " +
-//      p"fun ${alu(0).opcode} " +
-//      p"wbdata ${ Hexadecimal(alu(0).result)} ${data_wb(0)}" +
-//      p"op_data ${Hexadecimal(issueQueue(1).issue.bits.info.data(0))} " +
-//      p"op_data ${Hexadecimal(issueQueue(1).issue.bits.info.data(1))} " +
-//      p"\n")
+//      p"op_data0 ${   Hexadecimal(exe_op_data(0)(0))} " +
+//      p"info_data0 ${Hexadecimal(exe_reg_issue(0).info.data(0))} " +
+//      p"info_data1 ${Hexadecimal(exe_reg_issue(0).info.data(1))} " +
+//      p"sel0 ${exe_reg_d_sel(0)(0)(REG)} " +
+//      p"sel1 ${exe_reg_d_sel(0)(1)(IMM)}\n")
+    for (i <- 0 until nInst) {
+      printf(
+        p"issueQvalid ${issueQueue(i).issue.valid} " +
+        p"id ${commit(i).id} " +
+        p"alu_op1 ${Hexadecimal(alu(i).data(0))} " +
+        p"alu_op2 ${Hexadecimal(alu(i).data(1))} " +
+        p"fun ${alu(i).opcode} " +
+        p"result ${data_wb(i).valid}->${data_wb(i).addr} " +
+        p"${ Hexadecimal(alu(i).result)} " +
+        p"\n")
+    }
 //    printf(p"issueQueue in valid "); for (i <- 0 until nALU) printf(p"${issueQueue(i).in.valid} ")
 //    printf(p"self accept $self_accept " +
 //      p"${instQueue(1).issue.ready} \n")

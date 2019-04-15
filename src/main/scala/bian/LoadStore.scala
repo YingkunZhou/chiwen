@@ -194,6 +194,7 @@ class LoadStore extends Module with LsParam {
 
     val issue = Input(Vec(3, new LsIssue(wOrder, data_width)))
     val issueable = Output(Valid(UInt(wOrder.W))) //TODO: have to maintain the order
+    val limit = Output(Valid(UInt(wOrder.W)))
     val forward = Output(new ByPass(wPhyAddr)) //forward to inst queue
 
     val mem = new MemPortIo(data_width)
@@ -274,7 +275,7 @@ class LoadStore extends Module with LsParam {
   })
   val load_ctrl = Wire(new LdqCtrl(nLoad))
   load_ctrl.capty_gt(0) := load_queue.tail_val0 || load_ctrl.inc_head
-  load_ctrl.capty_gt(1) := load_queue.tail_val1 || (load_queue.tail_val0 && load_ctrl.inc_head)
+  load_ctrl.capty_gt(1) := Mux(load_ctrl.inc_head, load_queue.tail_val0, load_queue.tail_val1)
   load_ctrl.nxt_tail := load_queue.tail.map(next(_, nLoad, 2))
   load_ctrl.kill.const := VecInit(load_queue.ls_id.map(CmpId(io.kill.bits, _, io.head, wOrder-1))).asUInt
   load_ctrl.kill_ptr := load_ctrl.kill.ptr(
@@ -424,8 +425,8 @@ class LoadStore extends Module with LsParam {
   dec.io_mem_fcn(LD) := io.in.map(i => i.valid && i.bits.fcn === M_XRD)
   dec.io_mem_fcn(ST) := io.in.map(i => i.valid && i.bits.fcn === M_XWR)
   for (i <- 0 until nInst) {
-    dec.et_mem_fcn(LD)(i) := queue.read(i).fcn === M_XRD
-    dec.et_mem_fcn(ST)(i) := queue.read(i).fcn === M_XWR
+    dec.et_mem_fcn(LD)(i) := queue.read(i).fcn === M_XRD && !queue_ctrl.kill_head(i) //FIXED
+    dec.et_mem_fcn(ST)(i) := queue.read(i).fcn === M_XWR && !queue_ctrl.kill_head(i) //FIXED
   }
 /*==================================================*/
   /*==================execute stage===================*/
@@ -556,7 +557,6 @@ class LoadStore extends Module with LsParam {
 
   mem.tot_stall := mem.out_stall || mem.fwd_stall
 
-
   mem.bwd_above := Above(store_queue.ldq_ptr(wLoad-1,0), nLoad)
   mem.bwd_conti := store_queue.ldq_ptr(wLoad) === load_queue.tail(0)(wLoad)
   mem.bwd_valid := Mux(mem.bwd_conti, mem.bwd_above & load_queue.below, mem.bwd_above | load_queue.below)
@@ -570,9 +570,11 @@ class LoadStore extends Module with LsParam {
 
   io.in(0).ready := queue.tail_val0
   io.in(1).ready := Mux(io.mem_en, queue.tail_val1, queue.tail_val0)
-
+  //TODO: Does it affect timing???
   io.issueable.valid := Mux(queue_ctrl.inc_head(0), queue.head_val1, queue.head_val0)
   io.issueable.bits  := Mux(queue_ctrl.inc_head(0), queue.read(1).id, queue.read(0).id)
+  io.limit.valid := queue.head_val0
+  io.limit.bits := queue.read(0).id
   io.forward.valid := !mem.tot_stall && !mem.store && mem.fwd_fcn === M_XRD && io.mem.req.ready
   io.forward.addr  := load_queue.wb_addr
   io.wb_data := Cat(
@@ -582,14 +584,14 @@ class LoadStore extends Module with LsParam {
     Mux(mem_reg.byte_en(0), Mux1H(mem_reg.fwd_mux1H(0), store_queue.data(0)), io.mem.resp.bits.data( 7, 0)))
   //what about load.fwd_valid.reduce(_&&_)???
   io.ldcommit.valid := io.mem.resp.valid && mem_reg.valid(LD) && !mem.fwd_stall
-
-  when (store_queue.head_addr_ok) { for (i <- 0 until nLoad)
-//    when (mem.bwd_valid(i)) { it doesn't matter
-      load_queue.unsafe(i)(store_queue.head(wStore-1,0)) := false.B
-  }
+  //TODO unsafe modify at the same time
   when (io.ldcommit.valid) {
     load_queue.data_ok(mem_reg.ld_ptr) := true.B
     load_queue.unsafe(mem_reg.ld_ptr) := mem_reg.unsafe
+  }
+  when (store_queue.head_addr_ok) { for (i <- 0 until nLoad)
+  //    when (mem.bwd_valid(i)) { it doesn't matter
+    load_queue.unsafe(i)(store_queue.head(wStore-1,0)) := false.B
   }
   io.ldcommit.wb.valid := io.ldcommit.valid
   io.ldcommit.id       := mem_reg.ld_id
@@ -615,31 +617,57 @@ class LoadStore extends Module with LsParam {
   io.mem.req.bits.addr:= Mux(mem.store, store_queue.head_addr,
     Mux(mem.fwd_stall, mem_reg.ld_addr, Mux(mem.fwd_fcn === M_XWR, store_queue.addr, load_queue.addr)))
 
-  when (CycRange(io.cyc, 657, 665)) {
-    printf(p"store: head ${store_queue.head} tail ${store_queue.tail} id")
-    for (i <- 0 until nStore) printf(p" ${store_queue.ls_id(i)}")
-    printf("\n")
-    printf(
-      p"kill valid ${io.kill.valid} " +
-      p"kill id ${io.kill.bits} " +
-      p"kill cmp${VecInit(store_ctrl.kill.const)} " +
-      p"${store_ctrl.kill_ptr} " +
-      p"${store_ctrl.kill.valid(store_queue.valid)} " +
-      p"${VecInit(store_queue.valid)}\n")
-  }
-  when (CycRange(io.cyc, 657, 665)) {
+  when (CycRange(io.cyc, 378, 388)) {
+//    printf(
+//      p"kill valid ${io.kill.valid} " +
+//        p"kill id ${io.kill.bits} " +
+//        p"kill cmp${VecInit(store_ctrl.kill.const)} " +
+//        p"${store_ctrl.kill_ptr} " +
+//        p"${store_ctrl.kill.valid(store_queue.valid)} " +
+//        p"${VecInit(store_queue.valid)}\n")
+    when (io.mem.req.valid) {
+      when (io.mem.req.bits.fcn === M_XWR) {
+        printf("STORE id %d [ %x %x %x]\n",
+          store_queue.head_id,
+          io.mem.req.bits.typ,
+          io.mem.req.bits.addr,
+          io.mem.req.bits.data)
+      }.otherwise {
+        printf("LOAD id %d [ %x %x]\n",
+          Mux(mem.fwd_stall, mem_reg.ld_id,
+          Mux(mem.fwd_fcn === M_XWR, store_queue.id, load_queue.id)),
+          io.mem.req.bits.typ,
+          io.mem.req.bits.addr)
+      }
+    }
     printf(p"LoadStore input: " +
+      p"kill ${io.kill.valid}->${io.kill.bits} " +
       p"valid ${io.in(0).valid} ${io.in(1).valid} " +
+      p"load_capacity ${load_ctrl.capty_gt} " +
       p"head ${io.head} " +
-      p"req_ready ${io.mem.req.ready} " +
-      p"head_id ${store_queue.head_id} " +
+//      p"req_ready ${io.mem.req.ready} " +
+//      p"head_id ${store_queue.head_id} " +
       p"store ${mem.store} " +
-      p"ldstq ${queue.head} " +
-      p"${queue.tail} \n")
+      p"ld/st ${queue.head} ${queue.tail} \n")
     printf(p"load: head ${load_queue.head} tail ${load_queue.tail} id")
     for (i <- 0 until nLoad) printf(p" ${load_queue.ls_id(i)}")
     printf("\n")
+    printf(p"store: head ${store_queue.head} tail ${store_queue.tail} id")
+    for (i <- 0 until nStore) printf(p" <${store_queue.arready(i)},${store_queue.data_ok(i)}>" +
+      p"->${store_queue.ls_id(i)}")
+    printf("\n")
   }
+  when (io.cyc === 15476.U) {
+    for (i <- 0 until nEntry) printf(p" ${queue.entry(i).id}")
+    printf(p"\nkill_valid ${queue_ctrl.kill.valid(queue.valid)} " +
+      p"kill_ptr ${queue_ctrl.kill_ptr} " +
+      p"kill_const ${queue_ctrl.kill.const}" +
+      p"kill_head ${queue_ctrl.kill_head} \n")
+
+  }
+//  when (CycRange(io.cyc, 13870, 13880)) {
+//    printf(p"${load_queue.undone(load_queue.head(wStore-1,0))} ${load_queue.unsafe(load_queue.head(wStore-1,0))}\n")
+//  }
 //  printf(p"output: ready->Vec(${io.in(0).ready}, ${io.in(1).ready}) isseable->${io.issueable.valid}:" +
 //    p"${io.issueable.bits} forward->${io.forward.valid}:${io.forward.addr}\n" +
 //    p"output: ldcommit->${io.ldcommit.valid} wb_val->${io.ldcommit.valid} id->${io.ldcommit.id} " +

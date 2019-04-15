@@ -415,7 +415,7 @@ class BackEnd(implicit conf: CPUConfig) extends Module with BTBParams {
   io.front.forward(1) := !stall(1)(Stage.DEC) && !stall(1)(Stage.EXE) && !stall(1)(Stage.MEM)
 
   // Printout
-  for (i <- 0 until 2) {
+  for (i <- 0 until conf.nInst) {
     printf("Core: Cyc= %d PC(%x, %x, %x) [%c%c %c%c %c%c] %c%c %c%c Exe: DASM(%x)\n"
       , io.cyc
       , io.front.pc(i)
@@ -432,7 +432,8 @@ class BackEnd(implicit conf: CPUConfig) extends Module with BTBParams {
       , Mux(!exe_valid(i) || xcpt.valid || (exe_cancel && i.U === 1.U) ||
         stall(1)(Stage.MEM) || (stall(1)(Stage.EXE) && i.U === 1.U), BUBBLE, exe(i).inst)
     )
-
+  }
+  for (i <- 0 until conf.nInst) {
     when (wb_valid(i)) {
       printf("Core: Cyc= %d WB[ %x %x %x]\n"
         , io.cyc
