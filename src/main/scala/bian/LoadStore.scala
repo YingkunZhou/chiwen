@@ -617,54 +617,53 @@ class LoadStore extends Module with LsParam {
   io.mem.req.bits.addr:= Mux(mem.store, store_queue.head_addr,
     Mux(mem.fwd_stall, mem_reg.ld_addr, Mux(mem.fwd_fcn === M_XWR, store_queue.addr, load_queue.addr)))
 
-  when (CycRange(io.cyc, 378, 388)) {
-//    printf(
-//      p"kill valid ${io.kill.valid} " +
-//        p"kill id ${io.kill.bits} " +
-//        p"kill cmp${VecInit(store_ctrl.kill.const)} " +
-//        p"${store_ctrl.kill_ptr} " +
-//        p"${store_ctrl.kill.valid(store_queue.valid)} " +
-//        p"${VecInit(store_queue.valid)}\n")
-    when (io.mem.req.valid) {
-      when (io.mem.req.bits.fcn === M_XWR) {
-        printf("STORE id %d [ %x %x %x]\n",
-          store_queue.head_id,
-          io.mem.req.bits.typ,
-          io.mem.req.bits.addr,
-          io.mem.req.bits.data)
-      }.otherwise {
-        printf("LOAD id %d [ %x %x]\n",
-          Mux(mem.fwd_stall, mem_reg.ld_id,
-          Mux(mem.fwd_fcn === M_XWR, store_queue.id, load_queue.id)),
-          io.mem.req.bits.typ,
-          io.mem.req.bits.addr)
-      }
-    }
-    printf(p"LoadStore input: " +
-      p"kill ${io.kill.valid}->${io.kill.bits} " +
-      p"valid ${io.in(0).valid} ${io.in(1).valid} " +
-      p"load_capacity ${load_ctrl.capty_gt} " +
-      p"head ${io.head} " +
-//      p"req_ready ${io.mem.req.ready} " +
-//      p"head_id ${store_queue.head_id} " +
-      p"store ${mem.store} " +
-      p"ld/st ${queue.head} ${queue.tail} \n")
-    printf(p"load: head ${load_queue.head} tail ${load_queue.tail} id")
-    for (i <- 0 until nLoad) printf(p" ${load_queue.ls_id(i)}")
-    printf("\n")
-    printf(p"store: head ${store_queue.head} tail ${store_queue.tail} id")
-    for (i <- 0 until nStore) printf(p" <${store_queue.arready(i)},${store_queue.data_ok(i)}>" +
-      p"->${store_queue.ls_id(i)}")
-    printf("\n")
-  }
-  when (io.cyc === 15476.U) {
-    for (i <- 0 until nEntry) printf(p" ${queue.entry(i).id}")
-    printf(p"\nkill_valid ${queue_ctrl.kill.valid(queue.valid)} " +
-      p"kill_ptr ${queue_ctrl.kill_ptr} " +
-      p"kill_const ${queue_ctrl.kill.const}" +
-      p"kill_head ${queue_ctrl.kill_head} \n")
-
-  }
+//  when (CycRange(io.cyc, 15836, 15856)) {
+////    printf(
+////      p"kill valid ${io.kill.valid} " +
+////        p"kill id ${io.kill.bits} " +
+////        p"kill cmp${VecInit(store_ctrl.kill.const)} " +
+////        p"${store_ctrl.kill_ptr} " +
+////        p"${store_ctrl.kill.valid(store_queue.valid)} " +
+////        p"${VecInit(store_queue.valid)}\n")
+//    when (io.mem.req.valid) {
+//      when (io.mem.req.bits.fcn === M_XWR) {
+//        printf("STORE id %d [ %x %x %x]\n",
+//          store_queue.head_id,
+//          io.mem.req.bits.typ,
+//          io.mem.req.bits.addr,
+//          io.mem.req.bits.data)
+//      }.otherwise {
+//        printf("LOAD id %d [ %x %x]\n",
+//          Mux(mem.fwd_stall, mem_reg.ld_id,
+//          Mux(mem.fwd_fcn === M_XWR, store_queue.id, load_queue.id)),
+//          io.mem.req.bits.typ,
+//          io.mem.req.bits.addr)
+//      }
+//    }
+//    printf(p"LoadStore input: " +
+//      p"kill ${io.kill.valid}->${io.kill.bits} " +
+//      p"valid ${io.in(0).valid} ${io.in(1).valid} " +
+//      p"load_capacity ${load_ctrl.capty_gt} " +
+//      p"head ${io.head} " +
+////      p"req_ready ${io.mem.req.ready} " +
+////      p"head_id ${store_queue.head_id} " +
+//      p"store ${mem.store} " +
+//      p"ld/st ${queue.head} ${queue.tail} \n")
+//    printf(p"load: head ${load_queue.head} tail ${load_queue.tail} id")
+//    for (i <- 0 until nLoad) printf(p" ${load_queue.ls_id(i)}")
+//    printf("\n")
+//    printf(p"store: head ${store_queue.head} tail ${store_queue.tail} id")
+//    for (i <- 0 until nStore) printf(p" <${store_queue.arready(i)},${store_queue.data_ok(i)}>" +
+//      p"->${store_queue.ls_id(i)}")
+//    printf("\n")
+//  }
+//  when (io.cyc === 15476.U) {
+//    for (i <- 0 until nEntry) printf(p" ${queue.entry(i).id}")
+//    printf(p"\nkill_valid ${queue_ctrl.kill.valid(queue.valid)} " +
+//      p"kill_ptr ${queue_ctrl.kill_ptr} " +
+//      p"kill_const ${queue_ctrl.kill.const}" +
+//      p"kill_head ${queue_ctrl.kill_head} \n")
+//  }
 //  when (CycRange(io.cyc, 13870, 13880)) {
 //    printf(p"${load_queue.undone(load_queue.head(wStore-1,0))} ${load_queue.unsafe(load_queue.head(wStore-1,0))}\n")
 //  }

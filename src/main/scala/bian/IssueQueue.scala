@@ -296,8 +296,8 @@ class IssueQueue(val nEntry: Int, val i: Int) extends Module with BackParam {
       }
     }
   }
-  if (i < ALU3) {
-    when (CycRange(io.cyc,13859, 13880)) {
+  if (i <= ALU3) {
+    when (CycRange(io.cyc,15162, 15180)) {
       //    printf(
       //      p"in fire->${io.in.fire} " +
       //      p"in id->${io.in.bits.id} " +
@@ -313,7 +313,7 @@ class IssueQueue(val nEntry: Int, val i: Int) extends Module with BackParam {
       //      p"info->${io.issue.bits.info}\n")
       //    printf(p"entry->${issue.entry}\n")
       printf(
-        p"issue: " +
+        p"issue$i: " +
         p"count ${issue.count} " +
         p"tail ${issue.tail} " +
         p"table_valid ${issue.valid} " +
@@ -325,11 +325,11 @@ class IssueQueue(val nEntry: Int, val i: Int) extends Module with BackParam {
 //        p"snoop ${issue_ctrl.snoop} " +
 //        p"lsacc ${issue_ctrl.lsacc_orR}->${issue_ctrl.lsacc}" +
         p"kill ${io.kill.valid}->${io.kill.bits} ${issue_ctrl.tb_valid} ")
-      printf(p"\nio.in ${io.in.fire}->${io.in.bits.id} " +
-        p"issue_queue:")
-      for (j <- 0 until nEntry) printf(p" ${queue_valid(j)}-> ${issue_queue(j).id}")
+      printf(p"\n$i io.in ${io.in.fire}->${io.in.bits.id} " +
+        p"issue_queue$i:")
+      for (j <- 0 until nEntry) printf(p" ${queue_valid(j)}->${issue_queue(j).id}")
       printf(p" lsacc ${issue.lsacc}")
-      printf(" issue_table:")
+      printf(p" issue_table$i:")
       for (j <- 0 until nEntry) printf(p" ${issue_valid(j).valid}->${issue_valid(j).id}")
       printf("\n")
     }
