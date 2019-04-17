@@ -2,7 +2,7 @@ package bian
 
 import chisel3._
 import chisel3.util.{Cat, Fill}
-import common.{AxiIO, CPUConfig}
+import common.{AxiIO, CPUConfig, CycRange}
 
 class PredictInfo(data_width: Int) extends Predict(data_width) {
   val brchjr  = Vec(2, Bool()) //determine pick which btb
@@ -143,4 +143,9 @@ class FrontEnd(implicit conf: CPUConfig) extends Module with BTBParams {
   queue.in.pc_split   := pred_valid.reduce(_&&_) && pred_reg.brchjr(0) && pred_reg.redirect
   //if both is brchjr inst or dec stage back inst occur split case then inst split it
   queue.in.inst_split := (pred_valid(0) && pred_reg.brchjr.reduce(_&&_)) || pred_reg.split
+//  when (CycRange(io.cyc, 185764, 185765)) {
+//    printf(p"pc ${Hexadecimal(btb.if_pc)} btb predict ${btb.predict(0).valid}->" +
+//      p"<${btb.predict(0).bits.redirect}:${Hexadecimal(btb.predict(0).bits.tgt)}> ")
+//    printf(p"dec_isbj_0 ${dec_isbj(0)} redirect_0 ${fetchi.dec_btb(0).bits.redirect}\n")
+//  }
 }

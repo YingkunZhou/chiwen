@@ -74,9 +74,9 @@ class FrontQueue(implicit val conf: CPUConfig) extends Module with FrontParam {
   }.elsewhen(inst_ready && io.inst.map(_.valid).reduce(_||_)) {
     when (io.pred.redirect && !pred_ctrl.split_pc) {
       pred_ctrl.pc := io.pred.tgt
-    }.elsewhen (inst_valid(1)) {
+    }.elsewhen (io.inst(1).valid) {
       pred_ctrl.pc := io.pc(1) + 4.U
-    }.elsewhen(inst_valid(0)) {
+    }.elsewhen(io.inst(0).valid) {
       pred_ctrl.pc := Cat(pred_ctrl.pc(conf.inst_width-1,
         conf.pcLSB+1), 1.U(1.W), 0.U(conf.pcLSB.W))
     }
@@ -187,30 +187,30 @@ class FrontQueue(implicit val conf: CPUConfig) extends Module with FrontParam {
   io.pred.is_jal := pred_ctrl.empty && io.in.pred.is_jal
   io.pred.split  := pred_ctrl.empty && io.in.pred.split
 
-  when (CycRange(io.cyc, 777, 779)) {
-    printf(p"FroneQueue: " +
-      p"head ${inst_ptr(H)} tail ${inst_ptr(T)} " +
-//      p"output redirect ${io.pred.redirect} " +
-      p"split ${io.in.pred.split} " +
-      p"valid $inst_valid " +
-      p"nEmpty ${pred_ctrl.nEmpty} " +
-      p"head split ${head_pred.split}"
+//  when (CycRange(io.cyc, 185766, 185766)) {
+//    printf(p"FroneQueue: " +
+//      p"head ${inst_ptr(H)} tail ${inst_ptr(T)} " +
+////      p"output redirect ${io.pred.redirect} " +
+//      p"split ${io.in.pred.split} " +
+//      p"valid $inst_valid " +
+//      p"nEmpty ${pred_ctrl.nEmpty} " +
+//      p"head split ${head_pred.split}"
 //      "xcpt %x:%x kill %x:%x " +
 //      io.xcpt.valid,
 //      io.xcpt.bits,
 //      io.kill.valid,
 //      io.kill.bits,
-      + p"\n")
-    printf("input val0 %x inst: DASM(%x) val1 %x inst1: DASM(%x)\n",
-      io.in.inst(0).valid,
-      io.in.inst(0).bits,
-      io.in.inst(1).valid,
-      io.in.inst(1).bits
-    )
+//      + p"\n")
+//    printf("input val0 %x inst: DASM(%x) val1 %x inst1: DASM(%x)\n",
+//      io.in.inst(0).valid,
+//      io.in.inst(0).bits,
+//      io.in.inst(1).valid,
+//      io.in.inst(1).bits
+//    )
 //    printf(
 //      p"inst_ready $inst_ready " +
-//      p"${inst_valid(0)} ${io.inst(0).valid}:pc ${Hexadecimal(io.pc(0))} | " +
-//      p"${inst_valid(1)} ${io.inst(1).valid}:pc ${Hexadecimal(io.pc(1))} " +
+////      p"${inst_valid(0)} ${io.inst(0).valid}:pc ${Hexadecimal(io.pc(0))} | " +
+////      p"${inst_valid(1)} ${io.inst(1).valid}:pc ${Hexadecimal(io.pc(1))} " +
 //      p"split ${io.in.inst_split} \n" +
 //      p"tgt ${Hexadecimal(io.pred.tgt)} " +
 //      p"pred redirect ${io.pred.redirect} " +
@@ -229,7 +229,7 @@ class FrontQueue(implicit val conf: CPUConfig) extends Module with FrontParam {
 //      p"pred_ctrl_valid ${pred_ctrl.valid} " +
 //      p"pc ${Hexadecimal(pred_ctrl.pc)} " +
 //      p"pc_split ${pred_ctrl.split_pc}\n")
-  }
+//  }
 
 //
 //  val cnt = RegInit(0.U(32.W))

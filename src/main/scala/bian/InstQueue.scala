@@ -1,6 +1,7 @@
 package bian
 import chisel3._
 import chisel3.util._
+import common.CycRange
 
 class ByPass(val addr_width: Int) extends Bundle {
   val valid = Bool()
@@ -64,7 +65,7 @@ trait InstParam extends BackParam {
   val wCount = log2Ceil(nTable)
 }
 
-class InstQueue extends Module with InstParam {
+class InstQueue(val n: Int) extends Module with InstParam {
   val io = IO(new Bundle{
     val in = Flipped(DecoupledIO(new InstIssueI(wOrder, wPhyAddr)))
     val issue = DecoupledIO(new InstIssueO(wOrder, wPhyAddr, nCommit))
@@ -77,6 +78,8 @@ class InstQueue extends Module with InstParam {
     val head = Input(UInt(wOrder.W))
     val xcpt = Input(Bool())
     val kill = Input(Valid(UInt(wOrder.W)))
+
+    val cyc  = Input(UInt(data_width.W))
   })
   /*TODO List
   * how to deal with accelerate bypass to save time and enhance efficiency
@@ -85,7 +88,7 @@ class InstQueue extends Module with InstParam {
   val issue = RegInit({
     val w = Wire(new Bundle {
       val valid = Bool()
-      val entry = new IndexIssue(wOrder, nEntry)
+      val entry = new IndexIssue(wOrder, nTable)
       val rs = Vec(2, new ByPass(wPhyAddr))
       val snoop = Vec(nEntry, Vec(2, new ByPass(wPhyAddr)))
     })
@@ -98,11 +101,10 @@ class InstQueue extends Module with InstParam {
   val inst_ctrl = Wire(new Bundle {
     // for head
     val issue_kill  = Bool() /*whether to invalidate the reg issue or not*/
-    val issue_valid = Vec(2, Bool()) /*whether the 2 op-data ready or not*/
+    val issue_rsval = Vec(2, Bool()) /*whether the 2 op-data ready or not*/
     val issue_stall = Bool()
     val in_issue = new IndexIssue(wOrder, nTable) /*input issue from outside*/
     // for table
-    val entry  = new InstInfo(wPhyAddr)
     val empty  = UInt(nTable.W)
     val tbkill = Vec(nTable, Bool()) /*table kill vector*/
     val tidx   = UInt(log2Ceil(nTable).W) /*input alloc table index*/
@@ -142,19 +144,18 @@ class InstQueue extends Module with InstParam {
   io.issue.valid := issue.valid && !inst_ctrl.issue_kill
   io.issue.bits.id := issue.entry.id
   for (i <- 0 until 2) {
-    io.issue.bits.rs(i).valid := inst_ctrl.issue_valid(i)
+    io.issue.bits.rs(i).valid := inst_ctrl.issue_rsval(i)
     io.issue.bits.rs(i).addr  := issue.rs(i).addr
   }
   io.issue.bits.mem_en   := issue.entry.mem_en
-  io.issue.bits.info     := inst_ctrl.entry
   io.issue.bits.data_sel := issue.rs.map(rs => VecInit(
     io.bypass.map(bypass => bypass.addr === rs.addr && bypass.valid)).asUInt)
+  io.issue.bits.info     := inst_table(issue.entry.tidx)
 
-  io.forward.addr  := inst_ctrl.entry.rd.addr
-  io.forward.valid := inst_ctrl.entry.rd.valid && inst_ctrl.entry.f1 &&
-    inst_ctrl.issue_valid.reduce(_&&_) //&& io.issue.ready no needed
+  io.forward.addr  := io.issue.bits.info.rd.addr
+  io.forward.valid := io.issue.bits.info.rd.valid && io.issue.bits.info.f1 &&
+    inst_ctrl.issue_rsval.reduce(_&&_) //&& io.issue.ready no needed
 
-  inst_ctrl.entry  := inst_table(issue.entry.tidx)
   inst_ctrl.empty  := VecInit(inst_valid.map(!_.valid)).asUInt
   inst_ctrl.tidx   := Mux(io.issue.fire, issue.entry.tidx, PriorityEncoder(inst_ctrl.empty))
   inst_ctrl.tidx1H := Mux(io.issue.fire, UIntToOH(issue.entry.tidx), PriorityEncoderOH(inst_ctrl.empty))
@@ -162,7 +163,7 @@ class InstQueue extends Module with InstParam {
 
   inst_ctrl.issue_kill  := io.kill.valid && CmpId(io.kill.bits, issue.entry.id, io.head, wOrder-1)
   inst_ctrl.issue_stall := !io.issue.ready && !inst_ctrl.issue_kill
-  inst_ctrl.issue_valid := (0 until 2).map(i => io.issue.bits.data_sel(i).orR || issue.rs(i).valid)
+  inst_ctrl.issue_rsval := (0 until 2).map(i => io.issue.bits.data_sel(i).orR || issue.rs(i).valid)
 
   inst_ctrl.kill.cmp   := inst_queue.map(i => CmpId(io.kill.bits, i.id, io.head, wOrder-1))
   inst_ctrl.kill.kill  := io.kill.valid
@@ -193,7 +194,7 @@ class InstQueue extends Module with InstParam {
     issue.valid := false.B
   }.elsewhen(issue.valid) {
     when (inst_ctrl.issue_stall) {
-      for (i <- 0 until 2) issue.rs(i).valid := inst_ctrl.issue_valid(i)
+      for (i <- 0 until 2) issue.rs(i).valid := inst_ctrl.issue_rsval(i)
     }.elsewhen (inst_ctrl.count =/= 0.U) {
       issue.valid := inst_ctrl.fwd_val
       issue.entry := inst_queue(inst_ctrl.fwd_ptr)
@@ -295,13 +296,20 @@ class InstQueue extends Module with InstParam {
     }
   }
 
-//  printf(p"issue $issue\n")
-//  printf(p"count $inst_count queue ")
-//  for (i <- 0 until nEntry) {
-//    printf(p"${queue_valid(i)}->${inst_queue(i).id} ")
-//  }
+  if (n == 0) {
+    when (io.cyc === 1263.U) {
+      printf(p"${io.in.valid}->id ${io.in.bits.id} enter_tb ${inst_ctrl.enter_tb} tidx1H ${inst_ctrl.tidx1H}\n")
+    }
+  }
+  when (CycRange(io.cyc,1263, 1383)) {
+    printf(p"instQueue_$n ")
+    printf(p"head ${io.issue.valid}->${io.issue.bits.id}(${inst_ctrl.issue_rsval(0)},${inst_ctrl.issue_rsval(1)}) ")
+    printf(p"count $inst_count queue")
+    for (i <- 0 until nEntry) printf(p" ${queue_valid(i)}->${inst_queue(i).id}(${inst_ctrl.limit(i)}:" +
+      p"${inst_ctrl.snoop(i)(0)},${inst_ctrl.snoop(i)(1)})")
+    printf("\n")
+  }
 //  printf(p"\nsnoop ${inst_ctrl.snoop}\n")
-//  printf(p"valid_head ${inst_ctrl.issue_valid}\n")
 //  printf(p"ready ${inst_ctrl.limit}\n")
 //  val cnt = RegInit(0.U(32.W))
 //  cnt := cnt + 1.U

@@ -20,6 +20,7 @@ class ExeIssueI(id_width: Int, val addr_width: Int, val nCommit: Int, val data_w
   val rs = Vec(2, new ByPass(addr_width))
   val data_sel = Vec(2, UInt(nCommit.W))
   def rs_valid(i: Int): Bool = rs(i).valid || data_sel(i).orR
+  def rs_val_andR: Bool = (0 until 2).map(i => rs_valid(i)).reduce(_&&_)
   val info = new ExeInfo(addr_width, data_width)
 }
 
@@ -36,12 +37,13 @@ class TailInfo(val id_width: Int) extends Bundle {
   val id = UInt(id_width.W)
 }
 
-class IssueQueue(val nEntry: Int, val i: Int) extends Module with BackParam {
+class IssueQueue(val nEntry: Int, val n: Int) extends Module with BackParam {
   val io = IO(new Bundle {
     //in check if kill or not outside
     val in = Flipped(DecoupledIO(new ExeIssueI(wOrder, wPhyAddr, nCommit, data_width)))
 
     val issue  = Output(Valid(new ExeIssueO(wOrder, wPhyAddr, data_width, nCommit)))
+    val mem_acc = Input(Bool())
     val bypass = Input(Vec(nCommit, new ByPass(wPhyAddr)))//no latched, comb logic
     val bydata = Input(Vec(nCommit, UInt(data_width.W)))  //already latched one cycle, sequential logic
 
@@ -77,7 +79,7 @@ class IssueQueue(val nEntry: Int, val i: Int) extends Module with BackParam {
       val data_ok  = Bool() /*only for the store inst, whether data is ok*/
       val data_sel  = Vec(2, UInt(nCommit.W)) /*op-data sel from the bypass data*/
       val table_sel = Vec(nEntry, Vec(2, UInt(nCommit.W))) /*table update data select of bypass data*/
-      val lsacc     = Vec(nEntry, Bool())
+      val mmacc     = Vec(nEntry, Bool())
       val snoop     = Vec(nEntry, Vec(2, new ByPass(wPhyAddr)))
     })
     w.count := 0.U
@@ -88,7 +90,7 @@ class IssueQueue(val nEntry: Int, val i: Int) extends Module with BackParam {
     w.data_ok := DontCare
     w.data_sel  := DontCare
     w.table_sel := DontCare
-    w.lsacc := DontCare
+    w.mmacc := DontCare
     w.snoop := DontCare
     w
   })
@@ -106,29 +108,29 @@ class IssueQueue(val nEntry: Int, val i: Int) extends Module with BackParam {
     val snoop = Vec(nEntry, Vec(2, Bool())) /*bypass snoop info*/
     val limit = Vec(nEntry, Bool()) /*memory inst issue limitation*/
     val ready = Vec(nEntry, Bool()) /*the data ready vector*/
-    val lsacc = Vec(nEntry, Bool()) /*memory inst accelerate vector*/
+    val mmacc = Vec(nEntry, Bool()) /*memory inst accelerate vector*/
     val data_sel = Vec(nEntry, Vec(2, UInt(nCommit.W))) /*data select of bypass data and also already cached data*/
     val kill = new PriorityKill(nEntry) /*kill action*/
     /*the last valid entry index of queue*/
     def tail: UInt = count - 1.U
     def ready_orR: Bool = (ready.asUInt & kill.survive).orR
-    def lsacc_orR: Bool = (lsacc.asUInt & kill.survive & limit.asUInt).orR
+    def mmacc_orR: Bool = (mmacc.asUInt & kill.survive & limit.asUInt).orR
     /*whether forward entry is valid or not*/
-    def valid: Bool = lsacc_orR | ready_orR
+    def valid: Bool = mmacc_orR | ready_orR
     /*whether or not forward out of queue*/
-    def forward: Bool = Mux(lsacc_orR, fwd_data_ok, ready_orR)
+    def forward: Bool = Mux(mmacc_orR, fwd_data_ok, ready_orR)
     /*forward index of issue in the queue*/
-    def fwd_ptr: UInt = Mux(lsacc_orR, PriorityEncoder(lsacc), PriorityEncoder(ready))
+    def fwd_ptr: UInt = Mux(mmacc_orR, PriorityEncoder(mmacc), PriorityEncoder(ready))
     /*data ok only for store inst when its entry forward*/
-    def fwd_data_ok: Bool  = PriorityMux(lsacc, snoop.map(_(1)))
-    /*lsacc vector update one hot indicator*/
-    def lsacc_ptr1H: UInt = PriorityEncoderOH(lsacc.asUInt & kill.survive)
+    def fwd_data_ok: Bool  = PriorityMux(mmacc, snoop.map(_(1)))
+    /*mmacc vector update one hot indicator*/
+    def mmacc_ptr1H: UInt = PriorityEncoderOH(mmacc.asUInt & kill.survive)
   })
 
   io.in.ready := io.tail.ready && io.in.bits.valid
   io.tail.ready := issue_ctrl.empty.orR || issue.forward
-  io.tail.valid := !queue_valid.asUInt.orR
-  io.tail.id    := issue_queue(issue.tail).id
+  io.tail.valid := !queue_valid.asUInt.orR //TODO 55 is going to pop out at this cycle and 49 will be entered
+  io.tail.id    := issue_queue(issue.tail).id //TODO
 
   io.issue.valid := issue.valid && //for branchJump logic need to add kill cancel logic
     !(io.kill.valid && CmpId(io.kill.bits, issue.entry.id, io.head, wOrder-1))
@@ -149,20 +151,21 @@ class IssueQueue(val nEntry: Int, val i: Int) extends Module with BackParam {
       issue_ctrl.tb_data(issue.entry.tidx)(i))
   }
 
-  issue.valid    := issue_ctrl.valid || (io.in.fire && Mux(io.in.bits.mem_en, !io.limit,
-    io.in.bits.rs_valid(1)) && io.in.bits.rs_valid(0))
-  issue.forward  := issue_ctrl.forward || (io.in.fire && !issue_ctrl.push_queue)
-  issue.data_ok  := Mux(issue_ctrl.lsacc_orR, issue_ctrl.fwd_data_ok, io.in.bits.rs_valid(1))
-  issue.entry    :=
-    Mux(issue_ctrl.lsacc_orR, PriorityMux(issue_ctrl.lsacc, issue_queue),
+  issue.valid  := issue_ctrl.valid || (io.in.fire && io.in.bits.rs_valid(0) &&
+    Mux(io.mem_acc && io.in.bits.mem_en, !io.limit, io.in.bits.rs_valid(1))) //TODO: is it too complex???
+
+  issue.entry :=
+    Mux(issue_ctrl.mmacc_orR, PriorityMux(issue_ctrl.mmacc, issue_queue),
     Mux(issue_ctrl.ready_orR, PriorityMux(issue_ctrl.ready, issue_queue),
         issue_ctrl.in_issue))
 
-  issue_ctrl.push_queue      := !io.in.bits.rs_valid(0) || !io.in.bits.rs_valid(1) ||
-    issue_ctrl.lsacc_orR || (io.limit && io.in.bits.mem_en)
-  issue_ctrl.in_issue.id     := io.in.bits.id
+  issue.forward  := issue_ctrl.forward || (io.in.fire && !issue_ctrl.push_queue)
+  issue.data_ok  := Mux(issue_ctrl.mmacc_orR, issue_ctrl.fwd_data_ok, io.in.bits.rs_valid(1))
+
+  issue_ctrl.push_queue := !io.in.bits.rs_val_andR || issue_ctrl.mmacc_orR || (io.limit && io.in.bits.mem_en) //a piece of condition
+  issue_ctrl.in_issue.id := io.in.bits.id
   issue_ctrl.in_issue.mem_en := io.in.bits.mem_en
-  issue_ctrl.in_issue.tidx   := issue_ctrl.tidx
+  issue_ctrl.in_issue.tidx := issue_ctrl.tidx
 
   issue_ctrl.tidx     := Mux(issue.forward, issue.entry.tidx, PriorityEncoder(issue_ctrl.empty))
   issue_ctrl.tidx1H   := Mux(issue.forward, UIntToOH(issue.entry.tidx), PriorityEncoderOH(issue_ctrl.empty))
@@ -200,8 +203,7 @@ class IssueQueue(val nEntry: Int, val i: Int) extends Module with BackParam {
   }
   def insertQueue(i: Int): Unit = {
     issue_queue(i) := issue_ctrl.in_issue
-    issue.lsacc(i) := issue_ctrl.in_issue.mem_en &&
-      (issue_ctrl.valid || !io.in.bits.rs_valid(0) || io.limit)
+    issue.mmacc(i) := io.mem_acc && io.in.bits.mem_en && (issue_ctrl.valid || !io.in.bits.rs_valid(0) || io.limit)
     for (j <- 0 until 2) {
       issue.snoop(i)(j).addr  := io.in.bits.rs(j).addr
       issue.snoop(i)(j).valid := io.in.bits.rs_valid(j)
@@ -215,7 +217,7 @@ class IssueQueue(val nEntry: Int, val i: Int) extends Module with BackParam {
   for (i<- 0 until nEntry) {
     issue_ctrl.limit(i) := !io.issueable.valid || !CmpId(io.issueable.bits, issue_queue(i).id, io.head, wOrder-1)
     issue_ctrl.ready(i) := issue_ctrl.snoop(i).reduce(_&&_) && (issue_ctrl.limit(i) || !issue_queue(i).mem_en)
-    issue_ctrl.lsacc(i) := issue_ctrl.snoop(i)(0) && (issue.lsacc(i) || (issue_ctrl.snoop(i)(1) && issue_queue(i).mem_en))
+    issue_ctrl.mmacc(i) := issue_ctrl.snoop(i)(0) && (issue.mmacc(i) || (issue_ctrl.snoop(i)(1) && issue_queue(i).mem_en))
 
     for (j <- 0 until 2) {
       issue_ctrl.data_sel(i)(j) := VecInit(io.bypass.map(by =>
@@ -253,7 +255,7 @@ class IssueQueue(val nEntry: Int, val i: Int) extends Module with BackParam {
         updateQueue(i)
       }.elsewhen(shift_queue(i)) { if (i < nEntry-1) {
         issue_queue(i) := issue_queue(i + 1)
-        issue.lsacc(i) := issue.lsacc(i + 1)
+        issue.mmacc(i) := issue.mmacc(i + 1)
         for (j <- 0 until 2) {
           issue.snoop(i)(j).valid := issue_ctrl.snoop(i + 1)(j)
           issue.snoop(i)(j).addr  := issue.snoop(i + 1)(j).addr
@@ -264,8 +266,8 @@ class IssueQueue(val nEntry: Int, val i: Int) extends Module with BackParam {
         insertQueue(i)
       }.otherwise {
         updateQueue(i)
-        when (issue_ctrl.lsacc_ptr1H(i)) {
-          issue.lsacc(i) := false.B
+        when (issue_ctrl.mmacc_ptr1H(i)) {
+          issue.mmacc(i) := false.B
         }
       }
     }
@@ -296,8 +298,8 @@ class IssueQueue(val nEntry: Int, val i: Int) extends Module with BackParam {
       }
     }
   }
-  if (i <= ALU3) {
-    when (CycRange(io.cyc,15162, 15180)) {
+  if (n <= ALU3) {
+    when (CycRange(io.cyc,1263, 1383)) {
       //    printf(
       //      p"in fire->${io.in.fire} " +
       //      p"in id->${io.in.bits.id} " +
@@ -313,7 +315,7 @@ class IssueQueue(val nEntry: Int, val i: Int) extends Module with BackParam {
       //      p"info->${io.issue.bits.info}\n")
       //    printf(p"entry->${issue.entry}\n")
       printf(
-        p"issue$i: " +
+        p"issue_$n: " +
         p"count ${issue.count} " +
         p"tail ${issue.tail} " +
         p"table_valid ${issue.valid} " +
@@ -323,13 +325,13 @@ class IssueQueue(val nEntry: Int, val i: Int) extends Module with BackParam {
         p"id ${issue.entry.id} " +
 //        p"ctrl: " +
 //        p"snoop ${issue_ctrl.snoop} " +
-//        p"lsacc ${issue_ctrl.lsacc_orR}->${issue_ctrl.lsacc}" +
+//        p"mmacc ${issue_ctrl.mmacc_orR}->${issue_ctrl.mmacc}" +
         p"kill ${io.kill.valid}->${io.kill.bits} ${issue_ctrl.tb_valid} ")
-      printf(p"\n$i io.in ${io.in.fire}->${io.in.bits.id} " +
-        p"issue_queue$i:")
+      printf(p"\n$n io.in ${io.in.fire}->${io.in.bits.id} " +
+        p"issue_queue$n:")
       for (j <- 0 until nEntry) printf(p" ${queue_valid(j)}->${issue_queue(j).id}")
-      printf(p" lsacc ${issue.lsacc}")
-      printf(p" issue_table$i:")
+      printf(p" mmacc ${issue.mmacc}")
+      printf(p" issue_table$n:")
       for (j <- 0 until nEntry) printf(p" ${issue_valid(j).valid}->${issue_valid(j).id}")
       printf("\n")
     }

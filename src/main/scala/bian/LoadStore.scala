@@ -460,73 +460,66 @@ class LoadStore extends Module with LsParam {
   /*===================memory stage===================*/
   val mem = Wire(new Bundle {
     val forward   = Vec(data_width/8, new QueueForward(nStore)) /*load inst forward check store queue*/
+    val fwd_mux1H = Vec(data_width/8, UInt(nStore.W)) /*store2data load forward mux one hot*/
     val fwd_fcn   = UInt(M_X.getWidth.W) /*load or store inst*/
     val fwd_ptr   = UInt((wStore+1).W) /*latched forward pointer of store queue*/
-    val fwd_addr  = UInt((data_width-2).W) /*latched forward address not include lowest two bits*/
+    val fwd_addr  = UInt(data_width.W) /*latched forward address not include lowest two bits*/
+    val fwd_type  = UInt(MT_X.getWidth.W) /*load inst type*/
     val fwd_conti = Bool() /*store queue forward part continue: is head is below tail*/
     val fwd_valid = UInt(nStore.W) /*store queue forward part valid vector*/
+    val fwd_en    = Bool()
+    def byte_en: UInt = VecInit((0 until data_width/8).map(i => /*data forward byte en*/
+      forward(i).valid(fwd_valid) && (fwd_type === MT_W  ||
+        (fwd_type(1,0) === 1.U && fwd_addr(1,0) === i.U) ||
+        (fwd_type(1,0) === 2.U && fwd_addr(1,0) === (i/2).U)))).asUInt
     def fwd_below: UInt = Below(fwd_ptr(wStore-1,0), nStore) /*store queue forward back below tail vector*/
-    val fwd_stall = Bool() /*inside stall, store queue forward stall memory assess*/
 
     val backward = new QueueBackward(nLoad) /*store inst backward check load queue*/
     val bwd_above = UInt(nLoad.W) /*load queue backward part above head vector*/
     val bwd_conti = Bool() /*load queue backward part continue: is head below tail*/
     val bwd_valid = UInt(nLoad.W) /*load queue backward part valid vector*/
+
     val store = Bool() /*store inst valid to memory port to write back data*/
-    val out_stall = Bool() /*not include forward stall(inside stall), just the outside stall signal,
-    therefore can still update forward info*/
-    val tot_stall = Bool() /*totally stall load & store, include forward stall(inside stall)*/
+    val stall = Bool() /*the outside stall signal*/
   })
   val mem_reg = RegInit({
     val w = Wire(new Bundle {
+      val valid  = Vec(2, Bool()) /*load or store valid in data back stage*/
+      val forward = Bool()
       val fwd_mux1H = Vec(data_width/8, UInt(nStore.W)) /*store2data load forward mux one hot*/
-      val fwd_valid = Vec(data_width/8, Bool()) /*store2load data forward valid*/
-      val valid = Vec(2, Bool()) /*load or store valid in data back stage*/
+      val fwd_valid = UInt((data_width/8).W) /*store2load data forward valid*/
       val ld_id   = UInt(wOrder.W) /*load inst id*/
-      val ld_typ  = UInt(MT_X.getWidth.W) /*load inst type*/
-      val ld_addr = UInt(data_width.W) /*load inst address*/
       val ld_ptr  = UInt(wLoad.W) /*load inst queue pointer*/
       val wb_addr = UInt(wPhyAddr.W) /*load inst write back address*/
-      val stq_ptr = UInt((wStore+1).W) /*load inst forward store queue pointer*/
       val unsafe  = Vec(nStore, Bool()) /*load inst unsafe vector*/
-      def byte_en: UInt = VecInit((0 until data_width/8).map(i => /*data forward byte en*/
-        fwd_valid(i) && (ld_typ === MT_W ||
-        (ld_typ(1,0) === 1.U && ld_addr(1,0) === i.U) ||
-        (ld_typ(1,0) === 2.U && ld_addr(1,0) === (i/2).U)))).asUInt
     })
+    w.valid := Seq(false.B, false.B)
+    w.forward   := DontCare
     w.fwd_mux1H := DontCare
     w.fwd_valid := DontCare
-    w.valid := Seq(false.B, false.B)
+    w.forward := DontCare
     w.ld_id   := DontCare
-    w.ld_typ  := DontCare
-    w.ld_addr := DontCare
     w.ld_ptr  := DontCare
     w.wb_addr := DontCare
-    w.stq_ptr := DontCare
     w.unsafe  := DontCare
     w
   })
 
   mem.fwd_fcn := Mux(!load_queue.ls_valid || (store_queue.ls_valid
     && CmpId(store_queue.id, load_queue.id, io.head, wOrder-1)), M_XWR, M_XRD)
-  mem.fwd_addr  := Mux(mem.fwd_stall, mem_reg.ld_addr(data_width-1,2), load_queue.addr(data_width-1,2))
-  mem.fwd_ptr   := Mux(mem.fwd_stall, mem_reg.stq_ptr, load_queue.stq_ptr)
+  mem.fwd_addr  := load_queue.addr
+  mem.fwd_type  := load_queue.typ
+  mem.fwd_ptr   := load_queue.stq_ptr
+  mem.fwd_en    := ((~mem.byte_en).asUInt | VecInit(mem.fwd_mux1H.map(
+    Mux1H(_, store_queue.data_ok))).asUInt).andR //addr ok but data not ok
   mem.fwd_conti := mem.fwd_ptr(wStore) === store_queue.head(wStore)
   mem.fwd_valid := Mux(mem.fwd_conti, store_queue.above & mem.fwd_below, store_queue.above | mem.fwd_below)
-
   for (j <- 0 until data_width/8) {
-    mem.forward(j).const := store_queue.addr_eq(mem.fwd_addr) & store_queue.byte_en(j)
+    mem.forward(j).const := store_queue.addr_eq(mem.fwd_addr(data_width-1,2)) & store_queue.byte_en(j)
+    mem.fwd_mux1H(j) := mem.forward(j).ptr1H(mem.fwd_conti, store_queue.above, mem.fwd_below)
   }
-  // if fwd_stall, continue to update these nodes
-  when (!mem.out_stall && !mem.store) {
-    mem_reg.unsafe := (0 until nStore).map(i => mem.fwd_valid(i) && !store_queue.arready(i))
-    for (j <- 0 until data_width/8) {
-      mem_reg.fwd_mux1H(j) := mem.forward(j).ptr1H(continue = mem.fwd_conti,
-        above = store_queue.above, below = mem.fwd_below)
-      mem_reg.fwd_valid(j) := mem.forward(j).valid(mem.fwd_valid)
-    }
-  }
-  when (!mem.tot_stall) {
+
+  when (!mem.stall) {
     when (mem.store) {
       mem_reg.valid(ST) := true.B
       mem_reg.valid(LD) := false.B
@@ -534,15 +527,16 @@ class LoadStore extends Module with LsParam {
       mem_reg.valid(LD) := mem.fwd_fcn === M_XRD
       mem_reg.valid(ST) := false.B
       when (mem.fwd_fcn === M_XRD) {
+        mem_reg.forward   := mem.fwd_en
+        mem_reg.fwd_valid := mem.byte_en
+        mem_reg.fwd_mux1H := mem.fwd_mux1H
         mem_reg.ld_id   := load_queue.id
-        mem_reg.ld_typ  := load_queue.typ
-        mem_reg.ld_addr := load_queue.addr
         mem_reg.ld_ptr  := load_queue.ls_ptr
         mem_reg.wb_addr := load_queue.wb_addr
-        mem_reg.stq_ptr := load_queue.stq_ptr
+        mem_reg.unsafe  := (0 until nStore).map(i => mem.fwd_valid(i) && !store_queue.arready(i))
       }
       when (io.mem.req.ready) {
-        when (mem.fwd_fcn === M_XRD) {
+        when (mem.fwd_fcn === M_XRD && mem.fwd_en) {
           load_queue.addr_ok(load_queue.ls_ptr) := false.B
         }.elsewhen(store_queue.ls_valid) {
           store_queue.addr_ok(store_queue.ls_ptr) := false.B
@@ -551,11 +545,7 @@ class LoadStore extends Module with LsParam {
     }
   }
 
-  mem.out_stall := mem_reg.valid.reduce(_||_) && !io.mem.resp.valid
-  mem.fwd_stall := mem_reg.valid(LD) && (0 until data_width/8).map(i => mem_reg.byte_en(i) &&
-    !Mux1H(mem_reg.fwd_mux1H(i), store_queue.data_ok)).reduce(_||_) //addr ok but data not ok
-
-  mem.tot_stall := mem.out_stall || mem.fwd_stall
+  mem.stall := mem_reg.valid.reduce(_||_) && !io.mem.resp.valid
 
   mem.bwd_above := Above(store_queue.ldq_ptr(wLoad-1,0), nLoad)
   mem.bwd_conti := store_queue.ldq_ptr(wLoad) === load_queue.tail(0)(wLoad)
@@ -566,24 +556,26 @@ class LoadStore extends Module with LsParam {
       (store_queue.head_typ === MT_B && store_queue.head_addr(1,0) === j.U) ||
       (store_queue.head_typ === MT_H && store_queue.head_addr(1,0) === (j/2).U))).reduce(_|_)
 
-  mem.store := store_queue.head_data_ok && io.head === store_queue.head_id && !mem.tot_stall
+  mem.store := store_queue.head_data_ok && io.head === store_queue.head_id && !mem.stall
 
   io.in(0).ready := queue.tail_val0
   io.in(1).ready := Mux(io.mem_en, queue.tail_val1, queue.tail_val0)
   //TODO: Does it affect timing???
   io.issueable.valid := Mux(queue_ctrl.inc_head(0), queue.head_val1, queue.head_val0)
   io.issueable.bits  := Mux(queue_ctrl.inc_head(0), queue.read(1).id, queue.read(0).id)
+
   io.limit.valid := queue.head_val0
   io.limit.bits := queue.read(0).id
-  io.forward.valid := !mem.tot_stall && !mem.store && mem.fwd_fcn === M_XRD && io.mem.req.ready
+
+  io.forward.valid := !mem.stall && !mem.store && mem.fwd_fcn === M_XRD && io.mem.req.ready
   io.forward.addr  := load_queue.wb_addr
   io.wb_data := Cat(
-    Mux(mem_reg.byte_en(3), Mux1H(mem_reg.fwd_mux1H(3), store_queue.data(3)), io.mem.resp.bits.data(31,24)),
-    Mux(mem_reg.byte_en(2), Mux1H(mem_reg.fwd_mux1H(2), store_queue.data(2)), io.mem.resp.bits.data(23,16)),
-    Mux(mem_reg.byte_en(1), Mux1H(mem_reg.fwd_mux1H(1), store_queue.data(1)), io.mem.resp.bits.data(15, 8)),
-    Mux(mem_reg.byte_en(0), Mux1H(mem_reg.fwd_mux1H(0), store_queue.data(0)), io.mem.resp.bits.data( 7, 0)))
+    Mux(mem_reg.fwd_valid(3), Mux1H(mem_reg.fwd_mux1H(3), store_queue.data(3)), io.mem.resp.bits.data(31,24)),
+    Mux(mem_reg.fwd_valid(2), Mux1H(mem_reg.fwd_mux1H(2), store_queue.data(2)), io.mem.resp.bits.data(23,16)),
+    Mux(mem_reg.fwd_valid(1), Mux1H(mem_reg.fwd_mux1H(1), store_queue.data(1)), io.mem.resp.bits.data(15, 8)),
+    Mux(mem_reg.fwd_valid(0), Mux1H(mem_reg.fwd_mux1H(0), store_queue.data(0)), io.mem.resp.bits.data( 7, 0)))
   //what about load.fwd_valid.reduce(_&&_)???
-  io.ldcommit.valid := io.mem.resp.valid && mem_reg.valid(LD) && !mem.fwd_stall
+  io.ldcommit.valid := io.mem.resp.valid && mem_reg.valid(LD) && mem_reg.forward
   //TODO unsafe modify at the same time
   when (io.ldcommit.valid) {
     load_queue.data_ok(mem_reg.ld_ptr) := true.B
@@ -608,55 +600,58 @@ class LoadStore extends Module with LsParam {
   io.mem.req.bits.data := store_queue.head_data
   io.mem.req.bits.fcn := Mux(mem.store, M_XWR, M_XRD)
 
-  io.mem.req.valid := !mem.tot_stall &&
-    (mem.store || load_queue.ls_valid || store_queue.ls_valid || mem.fwd_stall)
+  io.mem.req.valid := !mem.stall &&
+    (mem.store || load_queue.ls_valid || store_queue.ls_valid)
 
   io.mem.req.bits.typ := Mux(mem.store, store_queue.head_typ,
-    Mux(mem.fwd_stall, mem_reg.ld_typ,  Mux(mem.fwd_fcn === M_XWR, store_queue.typ, load_queue.typ)))
+    Mux(mem.fwd_fcn === M_XWR, store_queue.typ, load_queue.typ))
 
   io.mem.req.bits.addr:= Mux(mem.store, store_queue.head_addr,
-    Mux(mem.fwd_stall, mem_reg.ld_addr, Mux(mem.fwd_fcn === M_XWR, store_queue.addr, load_queue.addr)))
+    Mux(mem.fwd_fcn === M_XWR, store_queue.addr, load_queue.addr))
 
-//  when (CycRange(io.cyc, 15836, 15856)) {
-////    printf(
-////      p"kill valid ${io.kill.valid} " +
-////        p"kill id ${io.kill.bits} " +
-////        p"kill cmp${VecInit(store_ctrl.kill.const)} " +
-////        p"${store_ctrl.kill_ptr} " +
-////        p"${store_ctrl.kill.valid(store_queue.valid)} " +
-////        p"${VecInit(store_queue.valid)}\n")
-//    when (io.mem.req.valid) {
-//      when (io.mem.req.bits.fcn === M_XWR) {
-//        printf("STORE id %d [ %x %x %x]\n",
-//          store_queue.head_id,
-//          io.mem.req.bits.typ,
-//          io.mem.req.bits.addr,
-//          io.mem.req.bits.data)
-//      }.otherwise {
-//        printf("LOAD id %d [ %x %x]\n",
-//          Mux(mem.fwd_stall, mem_reg.ld_id,
-//          Mux(mem.fwd_fcn === M_XWR, store_queue.id, load_queue.id)),
-//          io.mem.req.bits.typ,
-//          io.mem.req.bits.addr)
-//      }
-//    }
-//    printf(p"LoadStore input: " +
-//      p"kill ${io.kill.valid}->${io.kill.bits} " +
-//      p"valid ${io.in(0).valid} ${io.in(1).valid} " +
-//      p"load_capacity ${load_ctrl.capty_gt} " +
-//      p"head ${io.head} " +
-////      p"req_ready ${io.mem.req.ready} " +
-////      p"head_id ${store_queue.head_id} " +
-//      p"store ${mem.store} " +
-//      p"ld/st ${queue.head} ${queue.tail} \n")
-//    printf(p"load: head ${load_queue.head} tail ${load_queue.tail} id")
-//    for (i <- 0 until nLoad) printf(p" ${load_queue.ls_id(i)}")
-//    printf("\n")
-//    printf(p"store: head ${store_queue.head} tail ${store_queue.tail} id")
-//    for (i <- 0 until nStore) printf(p" <${store_queue.arready(i)},${store_queue.data_ok(i)}>" +
-//      p"->${store_queue.ls_id(i)}")
-//    printf("\n")
-//  }
+  when (CycRange(io.cyc,1263, 1383)) {
+//    printf(
+//      p"kill valid ${io.kill.valid} " +
+//        p"kill id ${io.kill.bits} " +
+//        p"kill cmp${VecInit(store_ctrl.kill.const)} " +
+//        p"${store_ctrl.kill_ptr} " +
+//        p"${store_ctrl.kill.valid(store_queue.valid)} " +
+//        p"${VecInit(store_queue.valid)}\n")
+    when (io.mem.req.valid) {
+      when (io.mem.req.bits.fcn === M_XWR) {
+        printf("STORE id %d [ %x %x %x]\n",
+          store_queue.head_id,
+          io.mem.req.bits.typ,
+          io.mem.req.bits.addr,
+          io.mem.req.bits.data)
+      }.otherwise {
+        printf("LOAD id %d [ %x %x]\n",
+          Mux(mem.fwd_fcn === M_XWR, store_queue.id, load_queue.id),
+          io.mem.req.bits.typ,
+          io.mem.req.bits.addr)
+      }
+    }
+    printf(p"LoadStore input: " +
+      p"kill ${io.kill.valid}->${io.kill.bits} " +
+      p"valid ${io.in(0).valid} ${io.in(1).valid} " +
+      p"head ${io.head} " +
+      p"issuable ${io.issueable.valid}->${io.issueable.bits} " +
+      p"limit ${io.limit.valid}->${io.limit.bits} " +
+//      p"req_ready ${io.mem.req.ready} " +
+//      p"head_id ${store_queue.head_id} " +
+      p"store ${mem.store} " +
+      p"ld/st ${queue.head} ${queue.tail} " +
+      p"data ${Hexadecimal(io.mem.resp.bits.data)} " +
+      p"\n")
+    printf(p"load: head ${load_queue.head} tail ${load_queue.tail} id")
+    for (i <- 0 until nLoad) printf(p" ${load_queue.addr_ok(i)}->${load_queue.ls_id(i)}")
+    printf("\n")
+    printf(p"store: head ${store_queue.head} tail ${store_queue.tail} id")
+    for (i <- 0 until nStore) printf(p" <${store_queue.arready(i)},${store_queue.data_ok(i)}>" +
+      p"->${store_queue.ls_id(i)}")
+    printf("\n")
+  }
+
 //  when (io.cyc === 15476.U) {
 //    for (i <- 0 until nEntry) printf(p" ${queue.entry(i).id}")
 //    printf(p"\nkill_valid ${queue_ctrl.kill.valid(queue.valid)} " +
