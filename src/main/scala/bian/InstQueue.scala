@@ -122,10 +122,9 @@ class InstQueue(val n: Int) extends Module with InstParam {
     def forward: UInt = VecInit((0 until nEntry).map(i => limit(i) &&
       (snoop(i)(0) || speed(i)(0)) && (snoop(i)(1) || speed(i)(1)))).asUInt
     /*issue forward ptr of queue*/
-    def fwd_ptr: UInt = Mux((kill.survive & forward).orR, PriorityEncoder(forward),
-      PriorityEncoder(limit.asUInt))
-    /*under limit constraint, exist such case that the queue has entry, but none can be issued*/
-    def fwd_val: Bool = (kill.survive & limit.asUInt).orR
+    def fwd_ptr: UInt =
+      Mux((kill.survive & forward).orR, PriorityEncoder(forward),
+      Mux((kill.survive & limit.asUInt).orR, PriorityEncoder(limit.asUInt), 0.U))
   })
 
   val inst_count = RegInit(0.U(wCount.W))
@@ -196,7 +195,7 @@ class InstQueue(val n: Int) extends Module with InstParam {
     when (inst_ctrl.issue_stall) {
       for (i <- 0 until 2) issue.rs(i).valid := inst_ctrl.issue_rsval(i)
     }.elsewhen (inst_ctrl.count =/= 0.U) {
-      issue.valid := inst_ctrl.fwd_val
+      issue.valid := true.B
       issue.entry := inst_queue(inst_ctrl.fwd_ptr)
       for (i <- 0 until 2) {
         issue.rs(i).valid := inst_ctrl.snoop(inst_ctrl.fwd_ptr)(i)
@@ -279,6 +278,8 @@ class InstQueue(val n: Int) extends Module with InstParam {
         }}
       }
     }
+  }
+  for (i <- 0 until nTable) {
     //inst table valid
     when (io.xcpt || (inst_ctrl.tbkill(i) && io.kill.valid)) {
       inst_valid(i).valid := false.B
@@ -296,18 +297,28 @@ class InstQueue(val n: Int) extends Module with InstParam {
     }
   }
 
-  if (n == 0) {
-    when (io.cyc === 1263.U) {
-      printf(p"${io.in.valid}->id ${io.in.bits.id} enter_tb ${inst_ctrl.enter_tb} tidx1H ${inst_ctrl.tidx1H}\n")
-    }
-  }
-  when (CycRange(io.cyc,1263, 1383)) {
+  when (CycRange(io.cyc,1317, 1337)) {
+    if (n == 0) printf(p"${io.in.valid}->id ${io.in.bits.id} enter_tb ${inst_ctrl.enter_tb}" +
+      p" tidx1H ${inst_ctrl.tidx1H} f1 ${io.in.bits.info.f1} ${inst_table(8).f1}\n")
     printf(p"instQueue_$n ")
-    printf(p"head ${io.issue.valid}->${io.issue.bits.id}(${inst_ctrl.issue_rsval(0)},${inst_ctrl.issue_rsval(1)}) ")
-    printf(p"count $inst_count queue")
-    for (i <- 0 until nEntry) printf(p" ${queue_valid(i)}->${inst_queue(i).id}(${inst_ctrl.limit(i)}:" +
-      p"${inst_ctrl.snoop(i)(0)},${inst_ctrl.snoop(i)(1)})")
+    printf(p"${io.issue.valid}->${io.issue.bits.id}(${inst_ctrl.issue_rsval(0)}," +
+      p"${inst_ctrl.issue_rsval(1)}) ${issue.entry.tidx} ${io.issue.bits.info.f1} ")
+    printf(p"count ${inst_ctrl.count} queue")
+    for (i <- 0 until nEntry) printf(
+      p" ${queue_valid(i)}->${inst_queue(i).id}(${inst_ctrl.limit(i)}:" +
+      p"${inst_ctrl.snoop(i)(0)},${inst_ctrl.snoop(i)(1)})")// +
+//      p" (${inst_ctrl.speed(i)(0)},${inst_ctrl.speed(i)(1)})" +
+//      p" ")
     printf("\n")
+  }
+  if (n == 1) {
+    when (io.cyc === 1319.U) {
+      printf(p"fwd_ptr ${inst_ctrl.fwd_ptr} fwd_vec")
+      for (i <- 0 until nEntry) {
+        printf(p"${inst_ctrl.forward(i)} <${inst_ctrl.speed(i)(0)} ${inst_ctrl.speed(i)(1)}>")
+      }
+      printf("\n")
+    }
   }
 //  printf(p"\nsnoop ${inst_ctrl.snoop}\n")
 //  printf(p"ready ${inst_ctrl.limit}\n")

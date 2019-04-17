@@ -515,7 +515,7 @@ class BackEnd(implicit conf: CPUConfig) extends Module with BackParam {
       Mux(instQueue(i).in.valid, io.front.inst(i).bits, BUBBLE))
   }
 
-  when (CycRange(io.cyc, 145, 145)) {
+//  when (CycRange(io.cyc, 145, 145)) {
 //    for (i <- 0 until nInst) {
 //      printf(p"exe_inst_$i: ${exe_reg_issue(i).valid} ${exe_reg_issue(i).id} ${exe_reg_issue(i).info.f1} ")
 //    }
@@ -567,16 +567,16 @@ class BackEnd(implicit conf: CPUConfig) extends Module with BackParam {
 //      p"sel_1 ${exe_reg_d_sel(0)(1)(REG)}" +
 //      p"\n")
 ////    for (i <- 0 until nInst) {
-      printf(
-        p"issueQvalid ${issueQueue(1).issue.valid} " +
-        p"id ${commit(1).id} " +
-        p"alu_op1 ${Hexadecimal(alu(1).data(0))} " +
-        p"alu_op2 ${Hexadecimal(alu(1).data(1))} " +
-        p"data ${Hexadecimal(issueQueue(1).issue.bits.info.data(1))} " +
-        p"fun ${alu(1).opcode} " +
-        p"result ${data_wb(1).valid}->${data_wb(1).addr} " +
-        p"${ Hexadecimal(alu(1).result)} " +
-        p"\n")
+//      printf(
+//        p"issueQvalid ${issueQueue(1).issue.valid} " +
+//        p"id ${commit(1).id} " +
+//        p"alu_op1 ${Hexadecimal(alu(1).data(0))} " +
+//        p"alu_op2 ${Hexadecimal(alu(1).data(1))} " +
+//        p"data ${Hexadecimal(issueQueue(1).issue.bits.info.data(1))} " +
+//        p"fun ${alu(1).opcode} " +
+//        p"result ${data_wb(1).valid}->${data_wb(1).addr} " +
+//        p"${ Hexadecimal(alu(1).result)} " +
+//        p"\n")
 //    }
 //    printf(p"issueQueue in valid "); for (i <- 0 until nALU) printf(p"${issueQueue(i).in.valid} ")
 //    printf(p"self accept $self_accept " +
@@ -587,7 +587,7 @@ class BackEnd(implicit conf: CPUConfig) extends Module with BackParam {
 //      p"redirect ${io.front.feedback.bits.redirect}" +
 //      p"tgt ${Hexadecimal(io.front.feedback.bits.tgt)} " +
 //      p"\n")
-  }
+//  }
 //  when (io.cyc === 15837.U) {
 //    printf(p"exe stage: " +
 //      //      p"op_data0 ${Hexadecimal(exe_op_data(1)(0))} " +

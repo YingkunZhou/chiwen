@@ -29,7 +29,7 @@ object Launcher {
       }
     },
     "InstQueue" -> {manager: TesterOptionsManager =>
-      Driver.execute(() => new InstQueue, manager) {
+      Driver.execute(() => new InstQueue(1), manager) {
         c => new InstQTest(c)
       }
     },
