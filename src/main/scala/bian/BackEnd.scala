@@ -34,9 +34,9 @@ class BackEnd(implicit conf: CPUConfig) extends Module with BackParam {
   val stateCtrl = Module(new StateCtrl).io
   stateCtrl.cyc := io.cyc
 //  val xcpt_todo = false.B
-  stateCtrl.xcpt_i.valid := csr.io.eret
-  stateCtrl.xcpt_i.id := Mux(in_pvl(0), stateCtrl.physic(0).id, stateCtrl.physic(1).id)
-  val loadStore = Module(new LoadStore).io
+val loadStore = Module(new LoadStore).io
+  stateCtrl.xcpt_i.valid := csr.io.eret || loadStore.rollback.valid
+  stateCtrl.xcpt_i.id := Mux(csr.io.eret, Mux(in_pvl(0), stateCtrl.physic(0).id, stateCtrl.physic(1).id), loadStore.rollback.bits)
   loadStore.cyc  := io.cyc
   loadStore.xcpt := stateCtrl.xcpt_o.valid
   loadStore.head := stateCtrl.head
@@ -48,8 +48,8 @@ class BackEnd(implicit conf: CPUConfig) extends Module with BackParam {
   * 1. optimizing exception recover procedure
   * 2. how to deal with exception
   * */
-  io.front.xcpt.valid := csr.io.eret// || stateCtrl.xcpt_i.valid
-  io.front.xcpt.bits  := csr.io.evec
+  io.front.xcpt.valid := stateCtrl.xcpt_o.valid //csr.io.eret// || stateCtrl.xcpt_i.valid
+  io.front.xcpt.bits  := stateCtrl.xcpt_o.pc //csr.io.evec
 //  io.front.xcpt.bits  := Mux(stateCtrl.xcpt_i.valid, stateCtrl.xcpt_o.pc, csr.io.evec)
   io.front.kill.valid := branchJump.kill.valid
   io.front.kill.bits  := branchJump.feedback.bits.tgt

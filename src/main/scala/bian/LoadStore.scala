@@ -609,7 +609,7 @@ class LoadStore extends Module with LsParam {
   io.mem.req.bits.addr:= Mux(mem.store, store_queue.head_addr,
     Mux(mem.fwd_fcn === M_XWR, store_queue.addr, load_queue.addr))
 
-  when (CycRange(io.cyc,1317, 1337)) {
+  when (CycRange(io.cyc,21966, 21975)) {
 //    printf(
 //      p"kill valid ${io.kill.valid} " +
 //        p"kill id ${io.kill.bits} " +

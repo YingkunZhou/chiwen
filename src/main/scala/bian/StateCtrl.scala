@@ -105,7 +105,7 @@ class StateCtrl extends Module with BackParam {
     val head   = Output(UInt(wOrder.W))
     val empty  = Output(Bool())
     val xcpt_i = Input(new XcptInfoI(wOrder))
-    val xcpt_o = Output(new XcptInfoO(wOrder, nBrchjr))
+    val xcpt_o = Output(new XcptInfoO(wOrder, data_width))
     //require
     val req_io  = Vec(nALU, new OpReqIO(wOrder))
     val req_id  = Input(Vec(nInst, UInt(wOrder.W)))
@@ -174,24 +174,9 @@ class StateCtrl extends Module with BackParam {
     w.id := DontCare
     w
   })
-  val xcpt_ctrl = Wire(new Bundle {
-    val epc = UInt(data_width.W)
-    val flush = Vec(nCommit, Bool())
-  })
-  xcpt_ctrl.epc   := id_pc(reorder.head(0)(wOrder-2,0))
-  xcpt_ctrl.flush := reorder.head.map(xcpt.valid && xcpt.id === _)
-  when (io.xcpt_i.valid && (!xcpt.valid || CmpId(io.xcpt_i.id, xcpt.id, reorder.head(0), wOrder-1))) {
-    xcpt.id := io.xcpt_i.id
-  }
 
-  when (xcpt_ctrl.flush(0))  {xcpt.valid := false.B
-  }.elsewhen (io.xcpt_i.valid) {xcpt.valid := true.B
-  }
-
-  io.xcpt_o.valid := xcpt_ctrl.flush(0)
-  io.xcpt_o.id := xcpt.id
-  io.xcpt_o.pc := xcpt_ctrl.epc
   val order_ctrl = Wire(new Bundle {
+    val flush     = Vec(nCommit, Bool())
     val inc_head  = Vec(nCommit, Bool())
     val next_head = Vec(nCommit, UInt(wOrder.W))
     val next_tail = Vec(nInst,   UInt(wOrder.W))
@@ -203,6 +188,17 @@ class StateCtrl extends Module with BackParam {
     val retiring  = UInt(nOrder.W)
     val kill      = Vec(nCommit, Bool()) //whether or not to cancel inc_head
   })
+  order_ctrl.flush := reorder.head.map(xcpt.valid && xcpt.id === _)
+  when (order_ctrl.flush(0))  {xcpt.valid := false.B
+  }.elsewhen (io.xcpt_i.valid) {xcpt.valid := true.B
+  }
+  when (io.xcpt_i.valid && (!xcpt.valid ||
+    CmpId(io.xcpt_i.id, xcpt.id, reorder.head(0), wOrder-1))) {
+    xcpt.id := io.xcpt_i.id
+  }
+  io.xcpt_o.valid := order_ctrl.flush(0)
+  io.xcpt_o.id := xcpt.id
+  io.xcpt_o.pc := id_pc(reorder.head(0)(wOrder-2,0))
   for (i <- 0 until nCommit) {
     io.what(i).addr := order_ctrl.physic(i)
     when (RegNext(order_ctrl.commited(i))) {
@@ -242,7 +238,7 @@ class StateCtrl extends Module with BackParam {
 
   order_ctrl.kill := reorder.head.map(io.kill.valid && io.kill.id === _)
   for (i <- 0 until nCommit) {
-    order_ctrl.inc_head(i) := reorder.head_val(i) && !xcpt_ctrl.flush(i) && !order_ctrl.kill(i)
+    order_ctrl.inc_head(i) := reorder.head_val(i) && !order_ctrl.flush(i) && !order_ctrl.kill(i)
     order_ctrl.commited(i) := (0 until i+1).map(j => order_ctrl.inc_head(j)).reduce(_&&_) // about 12~16 gates
   }
   io.retire := PopCount(order_ctrl.commited) + RegNext(io.st_commit.valid).asUInt
@@ -261,7 +257,7 @@ class StateCtrl extends Module with BackParam {
   }
 
   order_ctrl.next_tail := reorder.tail.map(_ + nInst.U)
-  when (xcpt_ctrl.flush(0)) {
+  when (order_ctrl.flush(0)) {
     reorder.tail := Seq(reorder.head(0), reorder.head(1))
   }.elsewhen(io.kill.valid && CmpId(io.kill.id, reorder.tail(0), reorder.head(0), wOrder-1)) {
     reorder.tail := Seq(io.kill.id, io.kill.id + 1.U)
@@ -386,7 +382,7 @@ class StateCtrl extends Module with BackParam {
   phy_ctrl.tail(0)  := PriorityEncoderOH(~latest.useing)
   phy_ctrl.tail(1)  := Reverse(PriorityEncoderOH(Reverse((~latest.useing).asUInt)))
 
-  when (!xcpt_ctrl.flush(0)) { //TODO: branch kill
+  when (!order_ctrl.flush(0)) { //TODO: branch kill
     commit.useing := (commit.useing | phy_ctrl.useing) & (~phy_ctrl.useless).asUInt
     commit.usecnt := (commit.usecnt + phy_ctrl.useing_cnt) - phy_ctrl.useless_cnt
     for (i <- 0 until nCommit) when(phy_ctrl.useing_inc(i)) {
@@ -420,7 +416,7 @@ class StateCtrl extends Module with BackParam {
     def split_usecnt: UInt = Mux(split, 1.U, 0.U)
   })
 
-  when(xcpt_ctrl.flush(0)) {
+  when(order_ctrl.flush(0)) {
     latest.maptb  := commit.maptb
     latest.rename := commit.rename
     latest.useing := commit.useing

@@ -297,7 +297,7 @@ class InstQueue(val n: Int) extends Module with InstParam {
     }
   }
 
-  when (CycRange(io.cyc,1317, 1337)) {
+  when (CycRange(io.cyc,21966, 21975)) {
     if (n == 0) printf(p"${io.in.valid}->id ${io.in.bits.id} enter_tb ${inst_ctrl.enter_tb}" +
       p" tidx1H ${inst_ctrl.tidx1H} f1 ${io.in.bits.info.f1} ${inst_table(8).f1}\n")
     printf(p"instQueue_$n ")
