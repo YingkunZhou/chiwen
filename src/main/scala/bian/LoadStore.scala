@@ -149,17 +149,20 @@ class LoadQueue(val nLoad: Int, id_width: Int, val addr_width: Int, data_width: 
   def push(i: Int, id: UInt, rd: UInt, typ: UInt, stq_ptr: UInt): Unit = {
     addr_ok(tail(i)(w-1,0)) := false.B
     data_ok(tail(i)(w-1,0)) := false.B
+    unsafe(tail(i)(w-1,0))  := Seq.fill(nStore)(false.B)
     ls_id(tail(i)(w-1,0))  := id
     ls_typ(tail(i)(w-1,0)) := typ
     sl_ptr(tail(i)(w-1,0)) := stq_ptr
     wbaddr(tail(i)(w-1,0)) := rd
   }
+  def update(i: Int, danger: Bool): Unit = {
+    unsafe(ls_ptr)(i) := danger
+  }
   def wb_addr: UInt = wbaddr(ls_ptr)
   def stq_ptr: UInt = sl_ptr(ls_ptr)
   def undone: UInt = VecInit((0 until nLoad).map(i => !data_ok(i) || unsafe(i).reduce(_||_))).asUInt
   def finish: Bool = !undone(head(w-1,0)) && head_val
-  def addr_eq(addr: UInt, head: UInt): UInt =
-    data_ok.asUInt & VecInit(unsafe.map(_(head))).asUInt &
+  def addr_eq(addr: UInt, head: UInt): UInt = VecInit(unsafe.map(_(head))).asUInt &
     VecInit(ls_addr.map(_(data_width-1,2) === addr)).asUInt
 }
 
@@ -443,9 +446,11 @@ class LoadStore extends Module with LsParam {
         load_queue.addr_ok(j) := true.B
       }
       for (j <- 0 until nStore) when (exe.stq_1H(i)(j)) {
-        store_queue.addr_ok(j) := true.B
-        store_queue.arready(j) := true.B
-        store_queue.ls_addr(j) := io.issue(i).addr
+        when (!store_queue.arready(j)) { //has never store addr here
+          store_queue.addr_ok(j) := true.B
+          store_queue.arready(j) := true.B
+          store_queue.ls_addr(j) := io.issue(i).addr
+        }
         when (io.issue(i).data_ok) {
           store_queue.data(3)(j) := io.issue(i).data(31,24)
           store_queue.data(2)(j) := io.issue(i).data(23,16)
@@ -491,7 +496,6 @@ class LoadStore extends Module with LsParam {
       val ld_id   = UInt(wOrder.W) /*load inst id*/
       val ld_ptr  = UInt(wLoad.W) /*load inst queue pointer*/
       val wb_addr = UInt(wPhyAddr.W) /*load inst write back address*/
-      val unsafe  = Vec(nStore, Bool()) /*load inst unsafe vector*/
       val except  = Bool()
     })
     w.valid := Seq(false.B, false.B)
@@ -502,13 +506,14 @@ class LoadStore extends Module with LsParam {
     w.ld_id   := DontCare
     w.ld_ptr  := DontCare
     w.wb_addr := DontCare
-    w.unsafe  := DontCare
     w.except  := false.B
     w
   })
 
-  mem.fwd_fcn := Mux(!load_queue.ls_valid || (store_queue.ls_valid
-    && CmpId(store_queue.id, load_queue.id, io.head, wOrder-1)), M_XWR, M_XRD)
+  mem.fwd_fcn := Mux(load_queue.ls_valid, M_XRD, M_XWR) //greedyly try to load the load first
+//  mem.fwd_fcn := Mux(!load_queue.ls_valid || (store_queue.ls_valid //cmp the id and then use the smaller one
+//    && CmpId(store_queue.id, load_queue.id, io.head, wOrder-1)), M_XWR, M_XRD)
+
   mem.fwd_addr  := load_queue.addr
   mem.fwd_type  := load_queue.typ
   mem.fwd_ptr   := load_queue.stq_ptr
@@ -542,11 +547,12 @@ class LoadStore extends Module with LsParam {
         mem_reg.ld_id   := load_queue.id
         mem_reg.ld_ptr  := load_queue.ls_ptr
         mem_reg.wb_addr := load_queue.wb_addr
-        mem_reg.unsafe  := (0 until nStore).map(i => mem.fwd_valid(i) && !store_queue.arready(i))
       }
       when (io.mem.req.ready) {
-        when (mem.fwd_fcn === M_XRD && mem.fwd_en) {
-          load_queue.addr_ok(load_queue.ls_ptr) := false.B
+        when (mem.fwd_fcn === M_XRD) {
+          when (mem.fwd_en) {
+            load_queue.addr_ok(load_queue.ls_ptr) := false.B
+          }
         }.elsewhen(store_queue.ls_valid) {
           store_queue.addr_ok(store_queue.ls_ptr) := false.B
         }
@@ -555,6 +561,13 @@ class LoadStore extends Module with LsParam {
   }
 
   mem.stall := (mem_reg.valid.reduce(_||_) || mem_reg.except) && !io.mem.resp.valid
+  //unsafe modify at the same time, but has no conflict
+  when (store_queue.head_addr_ok) { for (i <- 0 until nLoad)
+    load_queue.unsafe(i)(store_queue.head(wStore-1,0)) := false.B
+  }
+  when(load_queue.ls_valid && !mem.stall && !mem.store) { for (i <- 0 until nStore)
+    load_queue.update(i, mem.fwd_valid(i) && !store_queue.arready(i))
+  }
 
   mem.bwd_above := Above(store_queue.ldq_ptr(wLoad-1,0), nLoad)
   mem.bwd_conti := store_queue.ldq_ptr(wLoad) === load_queue.tail(0)(wLoad)
@@ -585,14 +598,8 @@ class LoadStore extends Module with LsParam {
     Mux(mem_reg.fwd_valid(3), Mux1H(mem_reg.fwd_mux1H(3), store_queue.data(0)), io.mem.resp.bits.data( 7, 0)))
   //what about load.fwd_valid.reduce(_&&_)???
   io.ldcommit.valid := io.mem.resp.valid && mem_reg.valid(LD) && mem_reg.forward && !mem_reg.except
-  //TODO unsafe modify at the same time
   when (io.ldcommit.valid) {
     load_queue.data_ok(mem_reg.ld_ptr) := true.B
-    load_queue.unsafe(mem_reg.ld_ptr) := mem_reg.unsafe
-  }
-  when (store_queue.head_addr_ok) { for (i <- 0 until nLoad)
-  //    when (mem.bwd_valid(i)) { it doesn't matter
-    load_queue.unsafe(i)(store_queue.head(wStore-1,0)) := false.B
   }
   io.ldcommit.wb.valid := io.ldcommit.valid
   io.ldcommit.id       := mem_reg.ld_id
@@ -618,7 +625,7 @@ class LoadStore extends Module with LsParam {
   io.mem.req.bits.addr:= Mux(mem.store, store_queue.head_addr,
     Mux(mem.fwd_fcn === M_XWR, store_queue.addr, load_queue.addr))
 
-  when (CycRange(io.cyc,518033, 518047)) {
+  when (CycRange(io.cyc,30406, 30422)) {
 //    printf(
 //      p"kill valid ${io.kill.valid} " +
 //        p"kill id ${io.kill.bits} " +
@@ -626,6 +633,10 @@ class LoadStore extends Module with LsParam {
 //        p"${store_ctrl.kill_ptr} " +
 //        p"${store_ctrl.kill.valid(store_queue.valid)} " +
 //        p"${VecInit(store_queue.valid)}\n")
+    for (i <- 0 until 3) {
+      printf(p"${io.issue(i).valid}->${io.issue(i).id} ${Hexadecimal(io.issue(i).addr)} ")
+    }
+    printf("\n")
     when (io.mem.req.valid) {
       when (io.mem.req.bits.fcn === M_XWR) {
         printf("STORE id %d [ %x %x %x]\n",
@@ -652,9 +663,20 @@ class LoadStore extends Module with LsParam {
       p"ld/st ${queue.head} ${queue.tail} " +
       p"data ${Hexadecimal(io.mem.resp.bits.data)} " +
       p"\n")
-    printf(p"forward: ${mem_reg.forward} ${mem_reg.fwd_valid} ${mem_reg.fwd_mux1H}" +
-      p"${mem.fwd_en} ${mem.byte_en} ${mem.fwd_mux1H}" +
-      p" addr_eq ${store_queue.addr_eq(mem.fwd_addr(data_width-1,2))}\n")
+    printf(p"forward: ${mem_reg.forward}" +
+      p" ${mem_reg.fwd_valid}" +
+      p" ${mem_reg.fwd_mux1H}" +
+      p" ${mem.fwd_en} ${mem.byte_en}" +
+      p" ${mem.fwd_mux1H}" +
+      p" ${load_queue.unsafe(mem_reg.ld_ptr)}" +
+      p" ${mem.bwd_valid} " +
+      p" ${mem.backward.valid(mem.bwd_valid)} && ${store_queue.head_addr_ok}" +
+      p" ${load_queue.addr_eq(addr = store_queue.head_addr(data_width-1,2),
+        head = store_queue.head(wStore-1,0))}" +
+      p" ${store_queue.head_addr}" +
+//      p" addr_eq0 ${Hexadecimal(store_queue.ls_addr(0)(data_width-1,2))} " +
+//      p" ${Hexadecimal(mem.fwd_addr(data_width-1,2))} " +
+      p"\n")
     printf(p"load: head ${load_queue.head} tail ${load_queue.tail} id")
     for (i <- 0 until nLoad) printf(p" ${load_queue.addr_ok(i)},${load_queue.data_ok(i)}->${load_queue.ls_id(i)}")
     printf("\n")

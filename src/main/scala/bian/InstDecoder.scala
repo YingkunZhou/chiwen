@@ -15,6 +15,7 @@ class InstDecoder(implicit conf: CPUConfig) extends Module {
   val io = IO(new Bundle {
     val inst = Input(UInt(conf.inst_width.W))
     val illegal = Output(Bool())
+    val system  = Output(Bool())
     val privil  = Output(Bool())
     val fencei  = Output(Bool())
     val order   = Output(Bool())
@@ -118,6 +119,7 @@ class InstDecoder(implicit conf: CPUConfig) extends Module {
 
   io.privil := io.inst(6,2) === "b11100".U || io.inst(6,2) === "b00011".U
   io.illegal := !val_inst //illegal instruction
+  io.system  := io.inst(6,2) === "b11100".U && io.inst(14,12) === "b000".U
   io.order   := order
   io.fencei  := fencei
   io.rs(0).addr  := io.inst(RS1_MSB, RS1_LSB)

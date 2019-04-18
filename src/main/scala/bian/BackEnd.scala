@@ -32,11 +32,14 @@ class BackEnd(implicit conf: CPUConfig) extends Module with BackParam {
   val in_pvl = (0 until nInst).map(i => io.front.inst(i).valid && instDecoder(i).privil)
   val in_bjr = (0 until nInst).map(i => io.front.inst(i).valid && io.front.pred.brchjr(i))
   val stateCtrl = Module(new StateCtrl).io
+  val loadStore = Module(new LoadStore).io
   stateCtrl.cyc := io.cyc
-//  val xcpt_todo = false.B
-val loadStore = Module(new LoadStore).io
-  stateCtrl.xcpt_i.valid := csr.io.eret || loadStore.rollback.valid
-  stateCtrl.xcpt_i.id := Mux(csr.io.eret, Mux(in_pvl(0), stateCtrl.physic(0).id, stateCtrl.physic(1).id), loadStore.rollback.bits)
+  stateCtrl.xcpt_i.valid := ((0 until nInst).map(i => io.front.inst(i).valid &&
+  instDecoder(i).system).reduce(_||_) && stateCtrl.empty) || loadStore.rollback.valid
+  stateCtrl.xcpt_i.id := Mux(loadStore.rollback.valid, loadStore.rollback.bits,
+    Mux(io.front.inst(0).valid && instDecoder(0).system,
+      stateCtrl.physic(0).id, stateCtrl.physic(1).id))
+
   loadStore.cyc  := io.cyc
   loadStore.xcpt := stateCtrl.xcpt_o.valid
   loadStore.head := stateCtrl.head
@@ -48,9 +51,8 @@ val loadStore = Module(new LoadStore).io
   * 1. optimizing exception recover procedure
   * 2. how to deal with exception
   * */
-  io.front.xcpt.valid := stateCtrl.xcpt_o.valid //csr.io.eret// || stateCtrl.xcpt_i.valid
-  io.front.xcpt.bits  := stateCtrl.xcpt_o.pc //csr.io.evec
-//  io.front.xcpt.bits  := Mux(stateCtrl.xcpt_i.valid, stateCtrl.xcpt_o.pc, csr.io.evec)
+  io.front.xcpt.valid := stateCtrl.xcpt_o.valid
+  io.front.xcpt.bits  := Mux(csr.io.eret, csr.io.evec, stateCtrl.xcpt_o.bits)
   io.front.kill.valid := branchJump.kill.valid
   io.front.kill.bits  := branchJump.feedback.bits.tgt
 
@@ -492,7 +494,7 @@ val loadStore = Module(new LoadStore).io
   csr.io.rw.addr  := exe_reg_csr_addr
   csr.io.rw.wdata := Mux(exe_reg_csr, alu(0).result, alu(1).result)
   csr.io.rw.cmd   := exe_reg_csr_cmd
-  csr.io.pc       := stateCtrl.xcpt_o.pc
+//  csr.io.pc       :=
   csr.io.xcpt     := false.B //stateCtrl.xcpt_o.valid
   when (csr.io.rw.cmd =/= CSR.N) {
     printf("CSR: Cyc= %d addr %x wdata %x cmd %x pc %x xcpt %x\n",
@@ -517,7 +519,8 @@ val loadStore = Module(new LoadStore).io
       Mux(instQueue(i).in.valid, io.front.inst(i).bits, BUBBLE))
   }
 
-//  when (CycRange(io.cyc, 145, 145)) {
+//  when (CycRange(io.cyc, 700, 800)) {
+//    printf(p"xcpt ${stateCtrl.xcpt_o.valid} ${Hexadecimal(io.front.xcpt.bits)}\n")
 //    for (i <- 0 until nInst) {
 //      printf(p"exe_inst_$i: ${exe_reg_issue(i).valid} ${exe_reg_issue(i).id} ${exe_reg_issue(i).info.f1} ")
 //    }

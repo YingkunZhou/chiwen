@@ -44,14 +44,9 @@ class KillInfo(val id_width: Int, val nBrchjr: Int) extends Bundle {
   val bidx = UInt(log2Ceil(nBrchjr).W)
 }
 
-class XcptInfoI(val id_width: Int) extends Bundle {
+class XcptInfo(val id_width: Int) extends Bundle {
   val valid = Bool()
   val id = UInt(id_width.W)
-}
-
-class XcptInfoO(id_width: Int, val data_width: Int)
-  extends XcptInfoI(id_width) {
-  val pc = UInt(data_width.W)
 }
 
 class Commit(val id_width: Int, val addr_width: Int) extends Bundle { //TODO: result write back and commit are at different moment
@@ -104,8 +99,8 @@ class StateCtrl extends Module with BackParam {
     val split  = Input(Bool())
     val head   = Output(UInt(wOrder.W))
     val empty  = Output(Bool())
-    val xcpt_i = Input(new XcptInfoI(wOrder))
-    val xcpt_o = Output(new XcptInfoO(wOrder, data_width))
+    val xcpt_i = Input(new XcptInfo(wOrder))
+    val xcpt_o = Output(Valid(UInt(data_width.W)))
     //require
     val req_io  = Vec(nALU, new OpReqIO(wOrder))
     val req_id  = Input(Vec(nInst, UInt(wOrder.W)))
@@ -169,7 +164,7 @@ class StateCtrl extends Module with BackParam {
   io.head  := reorder.head(0)
   io.empty := reorder.emtpy
   val xcpt = RegInit({
-    val w = Wire(new XcptInfoI(wOrder))
+    val w = Wire(new XcptInfo(wOrder))
     w.valid := false.B
     w.id := DontCare
     w
@@ -197,8 +192,7 @@ class StateCtrl extends Module with BackParam {
     xcpt.id := io.xcpt_i.id
   }
   io.xcpt_o.valid := order_ctrl.flush(0)
-  io.xcpt_o.id := xcpt.id
-  io.xcpt_o.pc := id_pc(reorder.head(0)(wOrder-2,0))
+  io.xcpt_o.bits  := id_pc(io.head(wOrder-2,0))
   for (i <- 0 until nCommit) {
     io.what(i).addr := order_ctrl.physic(i)
     when (RegNext(order_ctrl.commited(i))) {
@@ -212,29 +206,6 @@ class StateCtrl extends Module with BackParam {
       )
     }
   }
-//  when (CycRange(io.cyc, 715, 717)) {
-//    printf(
-////      p"commit_31 ${reorder.commit(31)} " +
-////      p"commit_0 ${reorder.commit(0)} " +
-////      p"t1->${latest.maptb(6)} " +
-////      p"using->${latest.useing(4)} " +
-////      p"split->${io.split} " +
-////      p"io.commit5 ${io.commit(1)} " +
-////      p"commit5 ${reorder.commit(5)} " +
-//      p"tail ${reorder.tail(0)} " +
-//      p"tail_val ${reorder.tail_val0} " +
-//      p"id_ready0 ${io.id_ready} " +
-//      p"bjr_val ${io.bjr_valid} " +
-//      p"bidx1H ${io.bidx1H} " +
-//      p"kill_val ${io.kill.valid} " +
-//      p"kill_id ${io.kill.id} " +
-//      p"kill_idx ${io.kill.bidx} " +
-//      p"head <val kill> " +
-//      p" ")
-//    for (i <- 0 until nCommit) printf(
-//      p"${reorder.head(i)} <${reorder.head_val(i)} ${order_ctrl.kill(i)}> ")
-//    printf("\n")
-//  }
 
   order_ctrl.kill := reorder.head.map(io.kill.valid && io.kill.id === _)
   for (i <- 0 until nCommit) {

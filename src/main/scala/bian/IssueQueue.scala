@@ -298,7 +298,7 @@ class IssueQueue(val nEntry: Int, val n: Int) extends Module with BackParam {
     }
   }
   if (n <= ALU3) {
-    when (CycRange(io.cyc,16729, 16738)) {
+    when (CycRange(io.cyc,30406, 30422)) {
       //    printf(
       //      p"in fire->${io.in.fire} " +
       //      p"in id->${io.in.bits.id} " +
