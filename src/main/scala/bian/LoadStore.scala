@@ -471,7 +471,7 @@ class LoadStore extends Module with LsParam {
     def byte_en: UInt = VecInit((0 until data_width/8).map(i => /*data forward byte en*/
       forward(i).valid(fwd_valid) && (fwd_type === MT_W  ||
         (fwd_type(1,0) === 1.U && fwd_addr(1,0) === i.U) ||
-        (fwd_type(1,0) === 2.U && fwd_addr(1,0) === (i/2).U)))).asUInt
+        (fwd_type(1,0) === 2.U && fwd_addr(1) === (i/2).U)))).asUInt
     def fwd_below: UInt = Below(fwd_ptr(wStore-1,0), nStore) /*store queue forward back below tail vector*/
 
     val backward = new QueueBackward(nLoad) /*store inst backward check load queue*/
@@ -492,6 +492,7 @@ class LoadStore extends Module with LsParam {
       val ld_ptr  = UInt(wLoad.W) /*load inst queue pointer*/
       val wb_addr = UInt(wPhyAddr.W) /*load inst write back address*/
       val unsafe  = Vec(nStore, Bool()) /*load inst unsafe vector*/
+      val except  = Bool()
     })
     w.valid := Seq(false.B, false.B)
     w.forward   := DontCare
@@ -502,6 +503,7 @@ class LoadStore extends Module with LsParam {
     w.ld_ptr  := DontCare
     w.wb_addr := DontCare
     w.unsafe  := DontCare
+    w.except  := false.B
     w
   })
 
@@ -518,6 +520,12 @@ class LoadStore extends Module with LsParam {
     mem.forward(j).const := store_queue.addr_eq(mem.fwd_addr(data_width-1,2)) & store_queue.byte_en(j)
     mem.fwd_mux1H(j) := mem.forward(j).ptr1H(mem.fwd_conti, store_queue.above, mem.fwd_below)
   }
+  // to fix wrong return back data according to xcpt occur
+  when(io.mem.resp.valid) {
+    mem_reg.except := false.B
+  }.elsewhen (io.xcpt && (mem_reg.valid(LD) || mem.fwd_fcn === M_XRD)) {
+    mem_reg.except := true.B
+  }
 
   when (!mem.stall) {
     when (mem.store) {
@@ -525,6 +533,7 @@ class LoadStore extends Module with LsParam {
       mem_reg.valid(LD) := false.B
     }.otherwise {
       mem_reg.valid(LD) := mem.fwd_fcn === M_XRD
+      //TODO: load-load and store-load use axi different id and add according logic when resp valid come back
       mem_reg.valid(ST) := false.B
       when (mem.fwd_fcn === M_XRD) {
         mem_reg.forward   := mem.fwd_en
@@ -545,7 +554,7 @@ class LoadStore extends Module with LsParam {
     }
   }
 
-  mem.stall := mem_reg.valid.reduce(_||_) && !io.mem.resp.valid
+  mem.stall := (mem_reg.valid.reduce(_||_) || mem_reg.except) && !io.mem.resp.valid
 
   mem.bwd_above := Above(store_queue.ldq_ptr(wLoad-1,0), nLoad)
   mem.bwd_conti := store_queue.ldq_ptr(wLoad) === load_queue.tail(0)(wLoad)
@@ -554,9 +563,9 @@ class LoadStore extends Module with LsParam {
     head = store_queue.head(wStore-1,0)) & (0 until data_width/8).map(j =>
     load_queue.byte_en(j) & Fill(nLoad, store_queue.head_typ === MT_W ||
       (store_queue.head_typ === MT_B && store_queue.head_addr(1,0) === j.U) ||
-      (store_queue.head_typ === MT_H && store_queue.head_addr(1,0) === (j/2).U))).reduce(_|_)
+      (store_queue.head_typ === MT_H && store_queue.head_addr(1) === (j/2).U))).reduce(_|_)
 
-  mem.store := store_queue.head_data_ok && io.head === store_queue.head_id && !mem.stall
+  mem.store := store_queue.head_data_ok && io.head === store_queue.head_id && !mem.stall && !io.xcpt
 
   io.in(0).ready := queue.tail_val0
   io.in(1).ready := Mux(io.mem_en, queue.tail_val1, queue.tail_val0)
@@ -570,12 +579,12 @@ class LoadStore extends Module with LsParam {
   io.forward.valid := !mem.stall && !mem.store && mem.fwd_fcn === M_XRD && io.mem.req.ready
   io.forward.addr  := load_queue.wb_addr
   io.wb_data := Cat(
-    Mux(mem_reg.fwd_valid(3), Mux1H(mem_reg.fwd_mux1H(3), store_queue.data(3)), io.mem.resp.bits.data(31,24)),
-    Mux(mem_reg.fwd_valid(2), Mux1H(mem_reg.fwd_mux1H(2), store_queue.data(2)), io.mem.resp.bits.data(23,16)),
-    Mux(mem_reg.fwd_valid(1), Mux1H(mem_reg.fwd_mux1H(1), store_queue.data(1)), io.mem.resp.bits.data(15, 8)),
-    Mux(mem_reg.fwd_valid(0), Mux1H(mem_reg.fwd_mux1H(0), store_queue.data(0)), io.mem.resp.bits.data( 7, 0)))
+    Mux(mem_reg.fwd_valid(0), Mux1H(mem_reg.fwd_mux1H(0), store_queue.data(3)), io.mem.resp.bits.data(31,24)),
+    Mux(mem_reg.fwd_valid(1), Mux1H(mem_reg.fwd_mux1H(1), store_queue.data(2)), io.mem.resp.bits.data(23,16)),
+    Mux(mem_reg.fwd_valid(2), Mux1H(mem_reg.fwd_mux1H(2), store_queue.data(1)), io.mem.resp.bits.data(15, 8)),
+    Mux(mem_reg.fwd_valid(3), Mux1H(mem_reg.fwd_mux1H(3), store_queue.data(0)), io.mem.resp.bits.data( 7, 0)))
   //what about load.fwd_valid.reduce(_&&_)???
-  io.ldcommit.valid := io.mem.resp.valid && mem_reg.valid(LD) && mem_reg.forward
+  io.ldcommit.valid := io.mem.resp.valid && mem_reg.valid(LD) && mem_reg.forward && !mem_reg.except
   //TODO unsafe modify at the same time
   when (io.ldcommit.valid) {
     load_queue.data_ok(mem_reg.ld_ptr) := true.B
@@ -609,7 +618,7 @@ class LoadStore extends Module with LsParam {
   io.mem.req.bits.addr:= Mux(mem.store, store_queue.head_addr,
     Mux(mem.fwd_fcn === M_XWR, store_queue.addr, load_queue.addr))
 
-  when (CycRange(io.cyc,21966, 21975)) {
+  when (CycRange(io.cyc,518033, 518047)) {
 //    printf(
 //      p"kill valid ${io.kill.valid} " +
 //        p"kill id ${io.kill.bits} " +
@@ -643,11 +652,14 @@ class LoadStore extends Module with LsParam {
       p"ld/st ${queue.head} ${queue.tail} " +
       p"data ${Hexadecimal(io.mem.resp.bits.data)} " +
       p"\n")
+    printf(p"forward: ${mem_reg.forward} ${mem_reg.fwd_valid} ${mem_reg.fwd_mux1H}" +
+      p"${mem.fwd_en} ${mem.byte_en} ${mem.fwd_mux1H}" +
+      p" addr_eq ${store_queue.addr_eq(mem.fwd_addr(data_width-1,2))}\n")
     printf(p"load: head ${load_queue.head} tail ${load_queue.tail} id")
-    for (i <- 0 until nLoad) printf(p" ${load_queue.addr_ok(i)}->${load_queue.ls_id(i)}")
+    for (i <- 0 until nLoad) printf(p" ${load_queue.addr_ok(i)},${load_queue.data_ok(i)}->${load_queue.ls_id(i)}")
     printf("\n")
     printf(p"store: head ${store_queue.head} tail ${store_queue.tail} id")
-    for (i <- 0 until nStore) printf(p" <${store_queue.arready(i)},${store_queue.data_ok(i)}>" +
+    for (i <- 0 until nStore) printf(p" <${store_queue.addr_ok(i)},${store_queue.arready(i)},${store_queue.data_ok(i)}>" +
       p"->${store_queue.ls_id(i)}")
     printf("\n")
   }

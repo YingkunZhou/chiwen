@@ -139,9 +139,10 @@ val loadStore = Module(new LoadStore).io
         i.U)
     }
   }
-//  when (io.cyc === 64694.U) {regfile.write(0).data := "h00019670".U }
-//  when (io.cyc === 64716.U) {regfile.write(0).data := "h000168bf".U }
-//  when (io.cyc === 12160.U) {regfile.write(0).data := "h00002620".U }
+
+//  when (io.cyc === 11769.U) {regfile.write(1).data := "h00002f2b".U }
+//  when (io.cyc === 11779.U) {regfile.write(1).data := "h00002da6".U }
+//  when (io.cyc === 11798.U) {regfile.write(0).data := "h00002f4a".U }
 //  when (io.cyc === 12174.U) {regfile.write(0).data := "h00002214".U }
 
   val common = Wire(Vec(4, Bool()))
@@ -303,7 +304,8 @@ val loadStore = Module(new LoadStore).io
       exe_reg_d_sel(i)(1)(IMM) := ir_inst(i).info.op2_sel === OP22_ITYPE ||
         ir_inst(i).info.op2_sel === OP22_UTYPE
 
-      exe_reg_issue(i).valid       := instQueue(i).issue.valid || instQueue(i).in.valid
+      exe_reg_issue(i).valid       := (instQueue(i).issue.valid || instQueue(i).in.valid)
+      // && stateCtrl.xcpt_o.valid, already exe_reg_issue use regnext to comb cancel it
       exe_reg_issue(i).id          := ir_inst(i).id
       exe_reg_issue(i).rs          := ir_inst(i).rs
       exe_reg_issue(i).mem_en      := ir_inst(i).mem_en
@@ -340,8 +342,8 @@ val loadStore = Module(new LoadStore).io
         (Fill(data_width, exe_reg_d_sel(i)(j)(IMM)) & exe_reg_issue(i).info.data(j)) |
         (Fill(data_width, exe_reg_d_sel(i)(j)(REG)) & exe_rs_data(i)(j))
     }
-    exe_inst_val(i) := exe_reg_issue(i).valid && !(inner_kill.valid &&
-      CmpId(inner_kill.id, exe_reg_issue(i).id, stateCtrl.head, wOrder-1)) // && !stateCtrl.xcpt_o.valid
+    exe_inst_val(i) := exe_reg_issue(i).valid && !RegNext(stateCtrl.xcpt_o.valid) &&
+      !(inner_kill.valid && CmpId(inner_kill.id, exe_reg_issue(i).id, stateCtrl.head, wOrder-1))
 
     exe_alu_data(i) := (exe_reg_issue(i).info.data(1) &
        Fill(data_width, exe_reg_d_sel(i)(1)(IMM) || exe_reg_issue(i).mem_en)) |

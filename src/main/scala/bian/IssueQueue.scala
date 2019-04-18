@@ -133,8 +133,7 @@ class IssueQueue(val nEntry: Int, val n: Int) extends Module with BackParam {
   io.tail.id    := issue_queue(issue.tail).id //TODO
 
   io.issue.valid := issue.valid && //for branchJump logic need to add kill cancel logic
-    !(io.kill.valid && CmpId(io.kill.bits, issue.entry.id, io.head, wOrder-1))
-  // no needed?? && !io.xcpt && !RegNext(io.xcpt) //TODO: add branch kill
+    !(io.kill.valid && CmpId(io.kill.bits, issue.entry.id, io.head, wOrder-1)) //TODO: xcpt no needed???
   io.issue.bits.id := issue.entry.id
   io.issue.bits.mem_en  := issue.entry.mem_en
   io.issue.bits.data_ok := issue.data_ok
@@ -299,7 +298,7 @@ class IssueQueue(val nEntry: Int, val n: Int) extends Module with BackParam {
     }
   }
   if (n <= ALU3) {
-    when (CycRange(io.cyc,21966, 21975)) {
+    when (CycRange(io.cyc,16729, 16738)) {
       //    printf(
       //      p"in fire->${io.in.fire} " +
       //      p"in id->${io.in.bits.id} " +
