@@ -104,7 +104,7 @@ class BTB(implicit conf: CPUConfig) extends Module with BTBParams {
   predict.jump_tgt := Mux1H(predict.lookup, btb.tgt)
   predict.bj_type  := Mux1H(predict.lookup, btb.bj_type)
   predict.h_count  := Mux1H(predict.lookup, btb.h_count)
-  val gshare_xor = gb_history(9,0) ^ io.if_pc(12, conf.pcLSB)// ^ gb_history(19,10)
+  val gshare_xor = gb_history(9,0) ^ io.if_pc(11, conf.pcLSB)// ^ gb_history(19,10)
   predict.select   := arb(gshare_xor)
   predict.gshare   := bht(gshare_xor)
   val shift_reg  = Reg(Bool())
@@ -117,8 +117,10 @@ class BTB(implicit conf: CPUConfig) extends Module with BTBParams {
     }
   }.elsewhen(io.forward) {
     shift_reg := !predict.branch
-    when (predict.branch || shift_wire ) {
-      gb_history := Cat(gb_history(wHistory-2,0), predict.redirect && !shift_wire)
+    when (shift_wire ) {
+      gb_history := Cat(gb_history(wHistory-2,0), 0.U(1.W))
+    }.elsewhen(predict.branch) {
+      gb_history := Cat(gb_history(wHistory-2,0), predict.taken)
     }
   }
   io.predict.redirect := predict.redirect
@@ -162,7 +164,7 @@ class BTB(implicit conf: CPUConfig) extends Module with BTBParams {
   fb_reg.miss     := io.fb_miss
   fb_reg.redirect := io.feedBack.redirect
   fb_reg.diff     := io.feedBack.diff
-  fb_reg.gshare   := io.feedBack.history(9,0) ^ io.fb_pc(12, conf.pcLSB)// ^ io.feedBack.history(19,10)
+  fb_reg.gshare   := io.feedBack.history(9,0) ^ io.fb_pc(11, conf.pcLSB)// ^ io.feedBack.history(19,10)
   fb_reg.lfsr     := fb_reg.lfsr_next
 
   val feedback = Wire(new Bundle {

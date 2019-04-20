@@ -12,11 +12,13 @@ object Jump {
 class MicroDecoder(inst_width: Int) extends Module{
   val io = IO(new Bundle{
     val inst = Input(UInt(inst_width.W))
-    val jump = Output(UInt(Jump.NUM.W))
+//    val jump = Output(UInt(Jump.NUM.W))
     val isjal = Output(Bool())
     val isjalr = Output(Bool())
-    val isbrnch = Output(Bool())
     val is_bj = Output(Bool())
+    val branch = Output(Bool())
+    val call = Output(Bool())
+    val retn = Output(Bool())
   })
 
   val func  = io.inst(6,2)
@@ -32,7 +34,7 @@ class MicroDecoder(inst_width: Int) extends Module{
   val csrr  = func === "b11100".U
   io.isjal := jal
   io.isjalr := jalr
-  io.isbrnch := brnch
+  io.branch := brnch
   io.is_bj := jal || jalr || brnch
   def link(addr: UInt): Bool = addr === 1.U || addr === 5.U
   /*
@@ -51,19 +53,25 @@ class MicroDecoder(inst_width: Int) extends Module{
   val rs1_addr = io.inst(RS1_MSB, RS1_LSB)
   val wbaddr   = io.inst(RD_MSB , RD_LSB)
   val pop_push = jalr && link(wbaddr) && link(rs1_addr) && wbaddr =/= rs1_addr //#4
+//
+//  val jump = Wire(Vec(Jump.NUM, Bool()))
+//  io.jump := jump.asUInt
+//
+//  jump(Jump.none) := (jal && !link(wbaddr)) ||
+//    (jalr && !link(wbaddr) && !link(rs1_addr))// #1
+//
+//  jump(Jump.push) := (jal  &&  link(wbaddr))   ||
+//    (jalr &&  link(wbaddr) && !link(rs1_addr)) || // #3
+//    (jalr &&  link(wbaddr) &&  link(rs1_addr)  && wbaddr === rs1_addr) || // #5
+//    pop_push // #4
+//
+//  jump(Jump.pop) := (jalr && !link(wbaddr) && link(rs1_addr))  || // #2
+//    pop_push // #2
 
-  val jump = Wire(Vec(Jump.NUM, Bool()))
-  io.jump := jump.asUInt
-
-  jump(Jump.none) := (jal && !link(wbaddr)) ||
-    (jalr && !link(wbaddr) && !link(rs1_addr))// #1
-
-  jump(Jump.push) := (jal  &&  link(wbaddr))   ||
+  io.call := (jal  &&  link(wbaddr))  ||
     (jalr &&  link(wbaddr) && !link(rs1_addr)) || // #3
     (jalr &&  link(wbaddr) &&  link(rs1_addr)  && wbaddr === rs1_addr) || // #5
     pop_push // #4
-
-  jump(Jump.pop) := (jalr && !link(wbaddr) && link(rs1_addr))  || // #2
+  io.retn := (jalr && !link(wbaddr) && link(rs1_addr))  || // #2
     pop_push // #2
-
 }
