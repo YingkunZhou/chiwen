@@ -9,10 +9,10 @@ import scala.math.pow
 trait ICCParams { // FIXME: the last two bits of pc must be 00
   val nLine   : Int = 16
   val wLine   : Int = log2Ceil(nLine)
-  val wOffset : Int = 6
+  val wOffset : Int = 8
   val nOffset : Int = pow(2, wOffset).toInt
-  val wTAG    : Int = 20
-  val TAG_LSB : Int = 12
+  val wTAG    : Int = 18
+  val TAG_LSB : Int = 14
   require(2 + wLine + wOffset + wTAG == 32)
 }
 
