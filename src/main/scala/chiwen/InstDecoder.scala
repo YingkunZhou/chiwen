@@ -20,6 +20,8 @@ class CtrlInfo extends Bundle {
   val illegal = Bool()
   val fencei  = Bool()
   val is_branch = Bool()
+  val jal = Bool()
+  val ret = Bool()
   val rs1_addr = UInt(5.W)
   val rs2_addr = UInt(5.W)
   val wbaddr   = UInt(5.W)
@@ -129,8 +131,12 @@ class InstDecoder(implicit conf: CPUConfig) extends Module {
   io.cinfo.rs2_addr := io.inst(RS2_MSB, RS2_LSB)
   io.cinfo.wbaddr   := io.inst(RD_MSB , RD_LSB)
 
-  val func = io.inst(6,0)
-  io.cinfo.is_branch := func === "b1100011".U
+  val func = io.inst(6,2)
+  def link(addr: UInt): Bool = addr === 1.U || addr === 5.U
+  io.cinfo.is_branch := func === "b11000".U
+  io.cinfo.jal := func === "b11011".U && link(io.cinfo.wbaddr)
+  io.cinfo.ret := func === "b11001".U && link(io.cinfo.rs1_addr) && !link(io.cinfo.wbaddr)
+
   // immediates
   val imm_itype  = io.inst(31,20)
   val imm_stype  = Cat(io.inst(31,25), io.inst(11,7))

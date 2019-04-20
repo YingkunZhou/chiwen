@@ -7,220 +7,247 @@ import common.{CPUConfig, CycRange}
 trait BTBParams {
   val nLow: Int = 64
   require(nLow == 64 || nLow == 32)
-  val nHigh: Int = 4
-  require(nHigh == 4)
-//  val nRAS    : Int = 8
+  val nRAS   : Int = 8
   val OFF_MSB: Int = 13
   val OFF_LSB: Int = 2
   val wHcount: Int = 2
+  val wHistory: Int = 10
+  val nBHT: Int = 1024
 }
 
 object BTBType {
-//  val invalid = 0
-//  val retn    = 1
-//  val branch  = 2
-//  val jump    = 3
-  val branch  = 0
-  val jump    = 1
+  val invalid = 0
+  val retn    = 1
+  val branch  = 2
+  val jump    = 3
   val NUM = jump + 1
   val SZ = log2Ceil(NUM)
 }
 
 class Predict(val data_width: Int) extends Bundle with BTBParams {
   val redirect = Bool() // = 0 cont || = 1 jump
+  val history = UInt(wHistory.W)
+  val diff = Bool()
   val tgt = UInt(data_width.W)
+}
+
+class PredictVal(data_width: Int) extends Predict(data_width) {
+  val valid = Bool()
+}
+
+class BHTshift extends Bundle {
+  val forward = Bool()
+  val branch = Bool()
+  val redirect = Bool()
 }
 
 class BTB(implicit conf: CPUConfig) extends Module with BTBParams {
   val io = IO(new Bundle{
     // pc stage inquire
-    // val raspeek  = Input(UInt(conf.xprlen.W)) // used for return type
     val if_pc = Input(UInt(conf.xprlen.W))
-    val predict  = Output(new Predict(conf.xprlen))
-
-    val fb_pc = Input(UInt(conf.xprlen.W))
-    val fb_type = Input(UInt(BTBType.SZ.W))
-    val feedBack = Input(Valid(new Predict(conf.xprlen)))
+    val predict = Output(new Predict(conf.xprlen))
+    //dec from inst decoder
+    val branch   = Input(Bool())
+    val forward  = Input(Bool())
+    val ras_pop  = Input(Bool())
+    val ras_push = Input(Valid(UInt(conf.data_width.W)))
+    val fb_pc    = Input(UInt(conf.xprlen.W))
+    val fb_miss  = Input(Bool())
+    val fb_type  = Input(UInt(BTBType.SZ.W))
+    val feedBack = Input(new PredictVal(conf.xprlen))
 
     val cyc = Input(UInt(conf.xprlen.W))
   })
 
+  def HcntInc(i: UInt): UInt = Cat(i.orR , i(1) || !i(0))
+  def SelInc(i: UInt): UInt = Cat(1.U(1.W) , i(1))
+  def HcntDec(i: UInt): UInt = Cat(i.andR, i(1) && !i(0))
+  def SelDec(i: UInt): UInt = Cat(0.U(1.W), i(1))
+  val gb_history = RegInit(0.U(wHistory.W))
+  val bht = Mem(nBHT, UInt(wHcount.W))
+  val arb = Mem(nBHT, Bool())
+  val ras = Module(new RAS(nRAS)).io
+  ras.pop  := io.ras_pop
+  ras.push := io.ras_push
   val btb = RegInit({
     val w = Wire(new Bundle {
-      val low_val  = Vec(nLow,  Bool())
-      val pc_low   = Vec(nLow,  UInt((OFF_MSB + 1 - OFF_LSB).W))
-      val tg_low   = Vec(nLow,  UInt((OFF_MSB + 1 - OFF_LSB).W))
-      val high_idx = Vec(nLow,  UInt(log2Ceil(nHigh).W))
+      val valid = Vec(nLow, Bool())
+      val pc = Vec(nLow, UInt(conf.data_width.W))
+      val tgt = Vec(nLow, UInt(conf.data_width.W))
       val bj_type  = Vec(nLow,  UInt(BTBType.SZ.W))
       val h_count  = Vec(nLow,  UInt(wHcount.W))
-
-      val high_val = Vec(nHigh, Bool())
-      val pc_high  = Vec(nHigh, UInt((conf.data_width-OFF_MSB-1).W))
-      val tg_high  = Vec(nHigh, UInt((conf.data_width-OFF_MSB-1).W))
     })
-    w.low_val  := Seq.fill(nLow)(false.B)
-    w.pc_low   := DontCare
-    w.tg_low   := DontCare
-    w.high_idx := DontCare
-    w.bj_type  := DontCare
-    w.h_count  := DontCare
-
-    w.high_val := Seq.fill(nHigh)(false.B)
-    w.pc_high  := DontCare
-    w.tg_high  := DontCare
+    w.valid   := Seq.fill(nLow)(false.B)
+    w.pc      := DontCare
+    w.tgt     := DontCare
+    w.bj_type := DontCare
+    w.h_count := DontCare
     w
   })
 
   val predict = Wire(new Bundle {
-    val high_val = UInt(nHigh.W)
-    def high_idx: UInt = OHToUInt(high_val)
-    val high_equ = UInt(nLow.W)
-    val pc_high  = UInt((conf.data_width-OFF_MSB-1).W)
-    val tg_high  = UInt((conf.data_width-OFF_MSB-1).W)
-
-    val low_val  = UInt(nLow.W)
-    val pc_low   = UInt((OFF_MSB + 1 - OFF_LSB).W)
-    val tg_low   = UInt((OFF_MSB + 1 - OFF_LSB).W)
-    val h_count  = UInt(wHcount.W)
-    val bj_type  = UInt(BTBType.SZ.W)
-
+    val lookup = UInt(nLow.W)
+    def valid: Bool = lookup.orR
+    val h_count = UInt(wHcount.W)
+    val gshare  = UInt(wHcount.W)
+    val select  = Bool()
+    val bj_type = UInt(BTBType.SZ.W)
+    def taken: Bool = Mux(select, gshare(1), h_count(1))
+    def diff: Bool  = gshare(1) ^ h_count(1) // && !select
+    def branch: Bool = valid && bj_type === BTBType.branch.U
+    def redirect: Bool = valid && (bj_type =/= BTBType.branch.U || taken)
     val jump_tgt = UInt(conf.data_width.W)
     val cont_tgt = UInt(conf.data_width.W)
   })
-
-  predict.pc_high  := io.if_pc(conf.data_width-1, OFF_MSB+1)
-  predict.tg_high  := Mux1H(predict.high_val, btb.tg_high)
-  predict.high_val := VecInit(btb.pc_high.map(_ === predict.pc_high)).asUInt & btb.high_val.asUInt
-  predict.high_equ := VecInit(btb.high_idx.map(_ === predict.high_idx)).asUInt
-
-  predict.pc_low  := io.if_pc(OFF_MSB, OFF_LSB)
-  predict.low_val := VecInit(btb.pc_low.map(_ === predict.pc_low)).asUInt & btb.low_val.asUInt & predict.high_equ
-  predict.tg_low  := Mux1H(predict.low_val, btb.tg_low)
-  predict.bj_type := Mux1H(predict.low_val, btb.bj_type)
-  predict.h_count := Mux1H(predict.low_val, btb.h_count)
-
-  predict.jump_tgt := Cat(predict.tg_high, predict.tg_low, 0.U(OFF_LSB.W))
   predict.cont_tgt := io.if_pc + 4.U
-  io.predict.redirect := predict.low_val.orR && (predict.bj_type =/= BTBType.branch.U || predict.h_count(1).toBool)
-  io.predict.tgt := Mux(io.predict.redirect, predict.jump_tgt, predict.cont_tgt)
+  predict.lookup := VecInit(btb.pc.map(_ === io.if_pc)).asUInt & btb.valid.asUInt
+  predict.jump_tgt := Mux1H(predict.lookup, btb.tgt)
+  predict.bj_type  := Mux1H(predict.lookup, btb.bj_type)
+  predict.h_count  := Mux1H(predict.lookup, btb.h_count)
+  val gshare_xor = gb_history(9,0) ^ io.if_pc(12, conf.pcLSB)// ^ gb_history(19,10)
+  predict.select   := arb(gshare_xor)
+  predict.gshare   := bht(gshare_xor)
+  val shift_reg  = Reg(Bool())
+  val shift_wire = shift_reg && io.branch
+  when (io.fb_miss) {
+    when (io.fb_type === BTBType.branch.U) {
+      gb_history := Cat(io.feedBack.history(wHistory-2,0), io.feedBack.redirect)
+    }.otherwise {
+      gb_history := io.feedBack.history
+    }
+  }.elsewhen(io.forward) {
+    shift_reg := !predict.branch
+    when (predict.branch || shift_wire ) {
+      gb_history := Cat(gb_history(wHistory-2,0), predict.redirect && !shift_wire)
+    }
+  }
+  io.predict.redirect := predict.redirect
+  io.predict.diff     := predict.diff
+  io.predict.history  := gb_history
+  io.predict.tgt := Mux(predict.bj_type === BTBType.retn.U, ras.peek,
+    Mux(predict.redirect, predict.jump_tgt, predict.cont_tgt))
 
-  val fb_wire = Wire(new Bundle {
-    val high_val = UInt(nHigh.W)
-    def high_idx: UInt = OHToUInt(high_val)
-    val pc_high  = UInt((conf.data_width-OFF_MSB-1).W)
-    val pc_high_equ = UInt(nLow.W)
-    val tg_high_neq = Bool()
-
-    val high_exist  = Bool()
-    val high_insert = Bool()
-    def high_replace: Bool = !high_exist && !high_insert
-
-    val low_val = UInt(nLow.W)
-    val pc_low  = UInt((OFF_MSB + 1 - OFF_LSB).W)
-    val low_inval = Vec(nLow, Bool())
-
-    val low_idx = UInt(log2Ceil(nLow).W)
-    val h_count = UInt(wHcount.W)
-  })
   val fb_reg = RegInit({
     val w = Wire(new Bundle {
       val valid = Bool()
+      val miss = Bool()
       val redirect = Bool()
       val btb_type = UInt(BTBType.SZ.W)
-      val high_idx = UInt(log2Ceil(nHigh).W)
-      val low_val  = UInt(nLow.W)
       val pc  = UInt(conf.data_width.W)
       val tgt = UInt(conf.data_width.W)
+      val diff = Bool()
+      val gshare = UInt(log2Ceil(nBHT).W)
       val lfsr = UInt(log2Ceil(nLow).W)//used for replaced
       def lfsr_next: UInt = {
         val i = log2Ceil(nLow)
         if (i == 5) Cat(lfsr(0) ^ lfsr(2), lfsr(i-1,1))
         else Cat(lfsr(0) ^ lfsr(1), lfsr(i-1,1))
       }
-      def low_exist: Bool = low_val.orR
-
     })
     w.valid := false.B
     w.redirect := false.B
+    w.miss := false.B
     w.lfsr := 1.U
     w.btb_type := DontCare
-    w.high_idx := DontCare
-    w.low_val  := DontCare
     w.pc  := DontCare
     w.tgt := DontCare
+    w.diff := DontCare
+    w.gshare := DontCare
     w
   })
-
-  val lru = Module(new LRU(nHigh)).io
-  lru.newest.bits := Mux(fb_wire.high_exist, fb_wire.high_idx,
-    Mux(fb_wire.high_insert, PriorityEncoder(btb.high_val.map(!_)), lru.oldest))
-  lru.newest.valid := io.feedBack.valid
-
-  fb_wire.pc_high  := io.fb_pc(conf.data_width-1, OFF_MSB+1)
-  fb_wire.high_val := VecInit(btb.pc_high.map(_ === fb_wire.pc_high)).asUInt & btb.high_val.asUInt
-  fb_wire.pc_high_equ := VecInit(btb.high_idx.map(_ === fb_wire.high_idx)).asUInt
-  fb_wire.tg_high_neq := Mux1H(fb_wire.high_val, btb.tg_high) =/= io.feedBack.bits.tgt(conf.data_width-1, OFF_MSB+1)
-
-  fb_wire.high_exist  := fb_wire.high_val.orR
-  fb_wire.high_insert := btb.high_val.map(!_).reduce(_||_)
-
-  fb_wire.low_inval := (0 until nLow).map(i =>
-    (fb_wire.high_replace && btb.high_idx(i) === lru.oldest) ||
-    (fb_wire.high_exist   && fb_wire.pc_high_equ(i) && fb_wire.tg_high_neq))
-  fb_wire.pc_low  := io.fb_pc(OFF_MSB, OFF_LSB)
-  fb_wire.low_val := VecInit(btb.pc_low.map(_ === fb_wire.pc_low)).asUInt & fb_wire.pc_high_equ & btb.low_val.asUInt
-
-  fb_reg.low_val  := fb_wire.low_val
   fb_reg.valid    := io.feedBack.valid
   fb_reg.pc       := io.fb_pc
-  fb_reg.tgt      := io.feedBack.bits.tgt
+  fb_reg.tgt      := io.feedBack.tgt
   fb_reg.btb_type := io.fb_type
-  fb_reg.redirect := io.feedBack.bits.redirect
-  fb_reg.high_idx := lru.newest.bits
+  fb_reg.miss     := io.fb_miss
+  fb_reg.redirect := io.feedBack.redirect
+  fb_reg.diff     := io.feedBack.diff
+  fb_reg.gshare   := io.feedBack.history(9,0) ^ io.fb_pc(12, conf.pcLSB)// ^ io.feedBack.history(19,10)
   fb_reg.lfsr     := fb_reg.lfsr_next
 
-  fb_wire.h_count := Mux1H(fb_reg.low_val, btb.h_count)
-  fb_wire.low_idx := Mux(fb_reg.low_exist, OHToUInt(fb_reg.low_val),
-    Mux(btb.low_val.reduce(_&&_), fb_reg.lfsr, PriorityEncoder(btb.low_val.map(!_))))
+  val feedback = Wire(new Bundle {
+    val lookup = UInt(nLow.W)
+    def exist: Bool = lookup.orR
+    val h_count  = UInt(wHcount.W)
+    val gshare   = UInt(wHcount.W)
+    val idx = UInt(log2Ceil(nLow).W)
+  })
+  feedback.lookup  := VecInit(btb.pc.map(_ === fb_reg.pc)).asUInt & btb.valid.asUInt
+  feedback.h_count := Mux1H(feedback.lookup, btb.h_count)
+  feedback.gshare  := bht(fb_reg.gshare)
+  feedback.idx := Mux(feedback.exist, OHToUInt(feedback.lookup),
+    Mux(btb.valid.asUInt.andR, fb_reg.lfsr, PriorityEncoder(~btb.valid.asUInt)))
 
-  // Think about two sequential redirect insts feed back, may cause some btb fault
-  when (io.feedBack.bits.redirect) {
-    for (i <- 0 until nLow) {
-      when (fb_wire.low_inval(i)) { //TODO: has some risk unable to invalidate all invalid entry
-        btb.low_val(i) := false.B
+  when (fb_reg.valid) {
+    when (fb_reg.redirect) {
+      btb.valid(feedback.idx)  := true.B
+    }.elsewhen(feedback.exist) {
+      btb.valid(feedback.idx)  := fb_reg.btb_type === BTBType.branch.U
+    }
+    when (fb_reg.redirect) {
+      btb.pc(feedback.idx)      := fb_reg.pc
+      btb.tgt(feedback.idx)     := fb_reg.tgt
+      btb.bj_type(feedback.idx) := fb_reg.btb_type
+    }
+    //update bht and btb parallel
+    when (fb_reg.btb_type === BTBType.branch.U) {
+      when (feedback.exist) {
+        when (fb_reg.redirect) {
+          btb.h_count(feedback.idx) := HcntInc(feedback.h_count)
+          bht(fb_reg.gshare) := HcntInc(feedback.gshare)
+        }.otherwise {
+          btb.h_count(feedback.idx) := HcntDec(feedback.h_count)
+          bht(fb_reg.gshare) := HcntDec(feedback.gshare)
+        }
+      }.elsewhen(fb_reg.redirect) {
+        btb.h_count(feedback.idx) := 2.U
+        bht(fb_reg.gshare) := 2.U
       }
     }
   }
-  when (fb_reg.redirect) {
-    // high part
-    btb.high_val(fb_reg.high_idx) := true.B
-    btb.tg_high(fb_reg.high_idx)  := fb_reg.tgt(conf.data_width-1, OFF_MSB+1)
-    btb.pc_high(fb_reg.high_idx)  := fb_reg.pc(conf.data_width-1, OFF_MSB+1)
-    // low part
-    btb.tg_low(fb_wire.low_idx)   := fb_reg.tgt(OFF_MSB, OFF_LSB)
-    btb.pc_low(fb_wire.low_idx)   := fb_reg.pc(OFF_MSB, OFF_LSB)
-    btb.high_idx(fb_wire.low_idx) := fb_reg.high_idx
-    btb.bj_type(fb_wire.low_idx)  := fb_reg.btb_type
+
+  val gshare_sel = arb(fb_reg.gshare)
+  when (fb_reg.miss && feedback.exist) {
+    when (fb_reg.diff && !gshare_sel) {
+      arb(fb_reg.gshare) := true.B
+    }.otherwise {
+      arb(fb_reg.gshare) := false.B
+    }
   }
 
-  when (fb_reg.redirect) {
-    btb.low_val(fb_wire.low_idx)  := true.B
-  }.elsewhen(fb_reg.valid && fb_reg.low_exist) {
-    btb.low_val(fb_wire.low_val)  := fb_reg.btb_type === BTBType.branch.U
+  when (predict.valid /*&& io.if_pc.bits === "h80005920".U*/) {
+    printf("BTB: Cyc= %d pc %x redirect %x index %d select %d gshare %d hcount %d bht idx %x"
+    , io.cyc
+    , io.if_pc
+    , io.predict.redirect
+    , OHToUInt(predict.lookup)
+    , predict.select
+    , predict.gshare
+    , predict.h_count
+    , gshare_xor
+    )
+//    for (i <- 0 until 10) printf(p" ${gb_history(i)}")
+    printf("\n")
+//    when (CycRange(io.cyc, 773, 857)) {
+//      when (fb_reg.valid) {
+//        printf(p"${fb_reg.redirect}" +
+//          p" ${fb_reg.low_exist} " +
+//          p"${fb_reg.low_idx(btb.low_val.asUInt)} " +
+//          p"${btb.low_val}\n")
+//      }
+//    }
   }
 
-  when (fb_reg.valid && fb_reg.low_exist) {
-    when (fb_reg.redirect) {
-      when (fb_wire.h_count =/= 3.U) {
-        btb.h_count(fb_wire.low_idx) := fb_wire.h_count + 1.U
-    }}.otherwise {
-      when (fb_wire.h_count =/= 0.U) {
-        btb.h_count(fb_wire.low_idx) := fb_wire.h_count - 1.U
-    }}
-  }.elsewhen(fb_reg.redirect) {
-    btb.h_count(fb_wire.low_idx) := 2.U
-  }
 
+//  when (CycRange(io.cyc, 635, 638)) {
+//    printf(p"DEBUG:" +
+//      p" ${io.predict.diff}" +
+//      p" ${fb_reg.miss}" +
+//      p" ${fb_reg.low_exist}" +
+//      p" ${fb_reg.diff}" +
+//      p" ${fb_wire.low_idx}" +
+//      p"\n")
+//  }
 //  when (CycRange(io.cyc, 900, 910)) {
 //    printf(p"cyc = ${io.cyc}\n" +
 //      p"pred_tgt ${Hexadecimal(io.predict.tgt)} " +

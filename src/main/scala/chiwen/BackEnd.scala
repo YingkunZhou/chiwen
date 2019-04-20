@@ -24,6 +24,8 @@ class MemCrtl extends WbCrtl {
 class ExeCrtl extends MemCrtl {
   val br_type = UInt(BR_N.getWidth.W)
   val branch  = Bool()
+  val ret = Bool()
+  val jal = Bool()
 //  val jump    = UInt(Jump.NUM.W)
 }
 
@@ -52,7 +54,8 @@ class Mem(implicit val conf: CPUConfig) extends Wb {
 class Exe(implicit conf: CPUConfig) extends Mem {
   val br_type  = UInt(BR_N.getWidth.W)
   val branch   = Bool()
-//  val jump     = UInt(Jump.NUM.W)
+  val jal      = Bool()
+  val ret      = Bool()
   val pred     = new Predict(conf.xprlen)
   val op1_data = UInt(conf.xprlen.W)
   val op2_data = UInt(conf.xprlen.W)
@@ -163,7 +166,8 @@ class BackEnd(implicit conf: CPUConfig) extends Module with BTBParams {
     exe.mem_fcn  := dec.cinfo.mem_fcn
     exe.mem_typ  := dec.cinfo.mem_typ
     exe.branch   := dec.cinfo.is_branch
-//    exe.jump     := io.front.jump
+    exe.jal      := dec.cinfo.jal
+    exe.ret      := dec.cinfo.ret
     exe.pred     := io.front.pred
   }
   // Execute Stage ==========================================================================================================================================
@@ -173,7 +177,8 @@ class BackEnd(implicit conf: CPUConfig) extends Module with BTBParams {
   exe_wire.csr_cmd := Mux(exe_valid, exe.csr_cmd, CSR.N)
   exe_wire.br_type := Mux(exe_valid, exe.br_type, BR_N)
   exe_wire.branch  := exe_valid && exe.branch
-//  exe_wire.jump    := Mux(exe_valid, exe.jump, 0.U)
+  exe_wire.jal     := exe_valid && exe.jal
+  exe_wire.ret     := exe_valid && exe.ret
   exe_wire.illegal := exe.illegal && exe_valid
 
   val alu = Module(new ALU()).io
@@ -184,31 +189,27 @@ class BackEnd(implicit conf: CPUConfig) extends Module with BTBParams {
   alu.ctrl.fun     := exe.alu_fun
   alu.ctrl.br_type := exe_wire.br_type
   alu.ctrl.wb_sel  := exe.wb_sel
-
   exe_wbdata := alu.result
 
-//  io.front.ras_pop  := Pulse(exe_wire.jump(Jump.pop).toBool,  !stall(Stage.MEM))
-//  io.front.ras_push.valid := Pulse(exe_wire.jump(Jump.push).toBool, !stall(Stage.MEM))
-//  io.front.ras_push.bits  := alu.target.conti
+  io.front.ras_pop        := Pulse(exe_wire.ret, !stall(Stage.MEM))
+  io.front.ras_push.valid := Pulse(exe_wire.jal, !stall(Stage.MEM))
+  io.front.ras_push.bits  := alu.target.conti
 
-  io.front.fb_pc := exe.pc
-//  val bj_type =
-//    Mux(exe_wire.branch,                                      CFIType.branch.U,
-//    Mux(exe_wire.jump(Jump.pop),                              CFIType.retn.U,
-//    Mux(exe_wire.jump(Jump.none) || exe_wire.jump(Jump.push), CFIType.jump.U,
-//                                                              CFIType.invalid.U
-//    )))
-
-  io.front.fb_type := Mux(exe_wire.branch, BTBType.branch.U, BTBType.jump.U)
   val next_pc =
     Mux(alu.ctrl.pc_sel === PC_BRJMP, alu.target.brjmp,
     Mux(alu.ctrl.pc_sel === PC_JALR,  alu.target.jpreg,
                                       alu.target.conti
     ))
-  io.front.feedBack.valid    := exe_wire.br_type =/= BR_N
-  io.front.feedBack.bits.tgt := next_pc
-  io.front.feedBack.bits.redirect := Pulse(alu.ctrl.pc_sel === PC_BRJMP || alu.ctrl.pc_sel === PC_JALR, !stall(Stage.MEM))
+  io.front.fb_pc := exe.pc
+  io.front.fb_type :=
+    Mux(exe_wire.branch, BTBType.branch.U,
+    Mux(exe_wire.ret, BTBType.retn.U, BTBType.jump.U))
 
+  io.front.feedBack.valid := Pulse(exe_wire.br_type =/= BR_N, !stall(Stage.MEM))
+  io.front.feedBack.tgt := next_pc
+  io.front.feedBack.redirect := alu.ctrl.pc_sel === PC_BRJMP || alu.ctrl.pc_sel === PC_JALR
+  io.front.feedBack.history  := exe.pred.history
+  io.front.feedBack.diff     := exe.pred.diff
   val mispredict = Wire(Bool())
   if (conf.hasBTB) mispredict := next_pc =/= exe.pred.tgt && exe_valid
   else mispredict := alu.ctrl.pc_sel =/= PC_4 && exe_valid
@@ -320,21 +321,40 @@ class BackEnd(implicit conf: CPUConfig) extends Module with BTBParams {
   io.front.forward  := !stall.asUInt.orR
 
   // Printout
-  printf("Core: Cyc= %d WB[ %x %x %x] (%x, %x, %x) %c %c %c ExeInst: DASM(%x)\n"
+//  printf("Core: Cyc= %d WB[ %x %x %x] (%x, %x, %x) %c %c %c ExeInst: DASM(%x)\n"
+//    , io.cyc
+//    , wb_wire.rf_wen
+//    , wb.wbaddr
+//    , wb_wbdata
+//    , io.front.pc
+//    , exe.pc
+//    , mem.pc
+//    , Mux(stall(Stage.MEM), Str("F"),             //FREEZE-> F
+//      Mux(stall(Stage.DEC), Str("S"), Str(" ")))  //STALL->S
+//    , Mux(alu.ctrl.pc_sel === 1.U, Str("B"),    //BJ -> B
+//      Mux(alu.ctrl.pc_sel === 2.U, Str("J"),    //JR -> J
+//      Mux(alu.ctrl.pc_sel === 3.U, Str("E"),    //EX -> E
+//      Mux(alu.ctrl.pc_sel === 0.U, Str(" "), Str("?")))))
+//    , Mux(csr.io.illegal, Str("X"), Str(" "))
+//    , Mux(io.front.xcpt.valid || !exe_valid, BUBBLE, exe.inst)
+//  )
+  when (wb_valid) {
+    printf("Core: Cyc= %d WB[ %x %x %x]\n"
+      , io.cyc
+      , wb_wire.rf_wen
+      , wb.wbaddr
+      , wb_wbdata
+    )
+  }
+  when (io.front.feedBack.valid /*&& io.front.fb_pc.bits === "h80005920".U*/) {
+    printf("BranchJump: Cyc= %d kill %x pc %x tgt %x actual %x expect %x inst DASM(%x)\n"
     , io.cyc
-    , wb_wire.rf_wen
-    , wb.wbaddr
-    , wb_wbdata
-    , io.front.pc
+    , mispredict
     , exe.pc
-    , mem.pc
-    , Mux(stall(Stage.MEM), Str("F"),             //FREEZE-> F
-      Mux(stall(Stage.DEC), Str("S"), Str(" ")))  //STALL->S
-    , Mux(alu.ctrl.pc_sel === 1.U, Str("B"),    //BJ -> B
-      Mux(alu.ctrl.pc_sel === 2.U, Str("J"),    //JR -> J
-      Mux(alu.ctrl.pc_sel === 3.U, Str("E"),    //EX -> E
-      Mux(alu.ctrl.pc_sel === 0.U, Str(" "), Str("?")))))
-    , Mux(csr.io.illegal, Str("X"), Str(" "))
-    , Mux(io.front.xcpt.valid || !exe_valid, BUBBLE, exe.inst)
-  )
+    , next_pc
+    , io.front.feedBack.redirect
+    , alu.target.conti =/= exe.pred.tgt
+    , exe.inst
+    )
+  }
 }
