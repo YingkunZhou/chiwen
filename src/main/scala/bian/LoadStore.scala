@@ -625,7 +625,7 @@ class LoadStore extends Module with LsParam {
   io.mem.req.bits.addr:= Mux(mem.store, store_queue.head_addr,
     Mux(mem.fwd_fcn === M_XWR, store_queue.addr, load_queue.addr))
 
-  when (CycRange(io.cyc,30406, 30422)) {
+  when (CycRange(io.cyc,810, 824)) {
 //    printf(
 //      p"kill valid ${io.kill.valid} " +
 //        p"kill id ${io.kill.bits} " +
@@ -673,7 +673,8 @@ class LoadStore extends Module with LsParam {
       p" ${mem.backward.valid(mem.bwd_valid)} && ${store_queue.head_addr_ok}" +
       p" ${load_queue.addr_eq(addr = store_queue.head_addr(data_width-1,2),
         head = store_queue.head(wStore-1,0))}" +
-      p" ${store_queue.head_addr}" +
+      p" ${Hexadecimal(store_queue.head_addr)}" +
+      p" ${Hexadecimal(store_queue.ls_addr(0))}" +
 //      p" addr_eq0 ${Hexadecimal(store_queue.ls_addr(0)(data_width-1,2))} " +
 //      p" ${Hexadecimal(mem.fwd_addr(data_width-1,2))} " +
       p"\n")

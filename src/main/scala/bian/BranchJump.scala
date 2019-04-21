@@ -14,6 +14,9 @@ class BrjrEntry(val data_width: Int) extends Bundle {
   val expect = Bool()
   val pc  = UInt(data_width.W)
   val tgt = UInt(data_width.W)
+  val history = UInt(10.W)
+  val diff = Bool()
+  val retn = Bool()
 }
 
 class BrjrIssueIO(val id_width: Int) extends Bundle {
@@ -43,7 +46,7 @@ class BranchJump extends Module with BjParam {
     val head = Input(UInt(wOrder.W))
     val commit  = Output(Valid(UInt(wOrder.W)))
 
-    val feedback = Output(Valid(new Predict(data_width)))
+    val feedback = Output(new PredictVal(data_width))
     val fb_pc   = Output(UInt(data_width.W))
     val fb_type = Output(UInt(BTBType.SZ.W))
 
@@ -111,7 +114,8 @@ class BranchJump extends Module with BjParam {
       pop_entry.tgt =/= fwd_target),
       (wire_actual ^ pop_entry.expect) && branch_acc)
     /*forward type*/
-    def fwd_type: UInt = Mux(!pop_valid || pop_issue.branch, BTBType.branch.U, BTBType.jump.U)
+    def fwd_type: UInt = Mux(!pop_valid || pop_issue.branch, BTBType.branch.U,
+      Mux(pop_entry.retn, BTBType.retn.U, BTBType.jump.U))
   })
   bj_ctrl.head_id     := io.head
   bj_ctrl.issue_id    := io.issue.map(_.id)
@@ -129,6 +133,9 @@ class BranchJump extends Module with BjParam {
   bj_ctrl.push_entry.expect := io.in.bits.redirect
   bj_ctrl.push_entry.pc     := io.in.bits.pc
   bj_ctrl.push_entry.tgt    := io.in.bits.tgt
+  bj_ctrl.push_entry.diff   := io.in.bits.diff
+  bj_ctrl.push_entry.history:= io.in.bits.history
+  bj_ctrl.push_entry.retn   := io.in.bits.retn
   val bj_reg = RegInit({
     val w = Wire(new Bundle{
       val count    = UInt(wCount.W)
@@ -154,9 +161,12 @@ class BranchJump extends Module with BjParam {
 
   io.fb_pc            := bj_ctrl.pop_entry.pc
   io.fb_type          := bj_ctrl.fwd_type
-  io.feedback.valid         := bj_ctrl.forward //is branch jump inst
-  io.feedback.bits.redirect := bj_ctrl.fwd_actual
-  io.feedback.bits.tgt      := bj_ctrl.fwd_tgt
+  io.feedback.valid   := bj_ctrl.forward //is branch jump inst
+  io.feedback.redirect:= bj_ctrl.fwd_actual
+  io.feedback.tgt     := bj_ctrl.fwd_tgt
+  io.feedback.history := bj_ctrl.pop_entry.history
+  io.feedback.diff    := bj_ctrl.pop_entry.diff
+
   io.kill.valid       := bj_ctrl.fwd_kill
   io.kill.id          := bj_ctrl.fwd_id //FIXME: NOTICE: current branch jump inst not the next inst to begin killed
   io.kill.bidx        := bj_ctrl.fwd_bidx

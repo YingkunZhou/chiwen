@@ -14,21 +14,24 @@ class ExeInfo(addr_width: Int, val data_width: Int)
   val data = Vec(2, UInt(data_width.W))
 }
 
-class ExeIssueI(id_width: Int, val addr_width: Int, val nCommit: Int, val data_width: Int)
+class ExeIssue(id_width: Int, val addr_width: Int, val data_width: Int)
   extends Issue(id_width) {
+  val info = new ExeInfo(addr_width, data_width)
+  def data_1: UInt = Mux(mem_en, info.sign_ext_imm, info.data(1))
+}
+
+class ExeIssueI(id_width: Int, addr_width: Int, val nCommit: Int, data_width: Int)
+  extends ExeIssue(id_width, addr_width, data_width) {
   val valid = Bool() //FIXME: use some trick here
   val rs = Vec(2, new ByPass(addr_width))
   val data_sel = Vec(2, UInt(nCommit.W))
   def rs_valid(i: Int): Bool = rs(i).valid || data_sel(i).orR
   def rs_val_andR: Bool = (0 until 2).map(i => rs_valid(i)).reduce(_&&_)
-  val info = new ExeInfo(addr_width, data_width)
 }
 
-class ExeIssueO(id_width: Int, val addr_width: Int, val data_width: Int, val nCommit: Int)
-  extends Issue(id_width) {
+class ExeIssueO(id_width: Int, addr_width: Int, data_width: Int)
+  extends ExeIssue(id_width, addr_width, data_width) {
   val data_ok = Bool()
-  val info = new ExeInfo(addr_width, data_width)
-  def data_1: UInt = Mux(mem_en, Cat(Fill(20, info.imm(11)), info.imm), info.data(1))
 }
 
 class TailInfo(val id_width: Int) extends Bundle {
@@ -42,7 +45,7 @@ class IssueQueue(val nEntry: Int, val n: Int) extends Module with BackParam {
     //in check if kill or not outside
     val in = Flipped(DecoupledIO(new ExeIssueI(wOrder, wPhyAddr, nCommit, data_width)))
 
-    val issue  = Output(Valid(new ExeIssueO(wOrder, wPhyAddr, data_width, nCommit)))
+    val issue  = Output(Valid(new ExeIssueO(wOrder, wPhyAddr, data_width)))
     val mem_acc = Input(Bool())
     val bypass = Input(Vec(nCommit, new ByPass(wPhyAddr)))//no latched, comb logic
     val bydata = Input(Vec(nCommit, UInt(data_width.W)))  //already latched one cycle, sequential logic
@@ -298,7 +301,7 @@ class IssueQueue(val nEntry: Int, val n: Int) extends Module with BackParam {
     }
   }
   if (n <= ALU3) {
-    when (CycRange(io.cyc,30406, 30422)) {
+    when (CycRange(io.cyc,810, 824)) {
       //    printf(
       //      p"in fire->${io.in.fire} " +
       //      p"in id->${io.in.bits.id} " +

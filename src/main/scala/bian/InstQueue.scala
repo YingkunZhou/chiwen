@@ -28,6 +28,7 @@ class Basic(val addr_width: Int) extends Bundle {
   val f1 = Bool()
   val branch = Bool()
   val imm = UInt(12.W)
+  def sign_ext_imm: UInt = Cat(Fill(20,imm(11)), imm)
   def wb_val: Bool = rd.valid && f1
 }
 
@@ -297,7 +298,7 @@ class InstQueue(val n: Int) extends Module with InstParam {
     }
   }
 
-  when (CycRange(io.cyc,30406, 30422)) {
+  when (CycRange(io.cyc,810,824)) {
     if (n == 0) printf(p"${io.in.valid}->id ${io.in.bits.id} enter_tb ${inst_ctrl.enter_tb}" +
       p" tidx1H ${inst_ctrl.tidx1H} f1 ${io.in.bits.info.f1} ${inst_table(8).f1}\n")
     printf(p"instQueue_$n ")

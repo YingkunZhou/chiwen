@@ -30,12 +30,12 @@ class BackEnd(implicit conf: CPUConfig) extends Module with BackParam {
   val in_wrb = (0 until nInst).map(i => io.front.inst(i).valid && instDecoder(i).rd.valid)
   val in_mem = (0 until nInst).map(i => io.front.inst(i).valid && instDecoder(i).mem_en)
   val in_pvl = (0 until nInst).map(i => io.front.inst(i).valid && instDecoder(i).privil)
+  val in_sys = (0 until nInst).map(i => io.front.inst(i).valid && instDecoder(i).system)
   val in_bjr = (0 until nInst).map(i => io.front.inst(i).valid && io.front.pred.brchjr(i))
   val stateCtrl = Module(new StateCtrl).io
   val loadStore = Module(new LoadStore).io
   stateCtrl.cyc := io.cyc
-  stateCtrl.xcpt_i.valid := ((0 until nInst).map(i => io.front.inst(i).valid &&
-  instDecoder(i).system).reduce(_||_) && stateCtrl.empty) || loadStore.rollback.valid
+  stateCtrl.xcpt_i.valid := ((in_sys(0) || (in_sys(1) && !in_pvl(0))) && stateCtrl.empty) || loadStore.rollback.valid
   stateCtrl.xcpt_i.id := Mux(loadStore.rollback.valid, loadStore.rollback.bits,
     Mux(io.front.inst(0).valid && instDecoder(0).system,
       stateCtrl.physic(0).id, stateCtrl.physic(1).id))
@@ -54,7 +54,7 @@ class BackEnd(implicit conf: CPUConfig) extends Module with BackParam {
   io.front.xcpt.valid := stateCtrl.xcpt_o.valid
   io.front.xcpt.bits  := Mux(csr.io.eret, csr.io.evec, stateCtrl.xcpt_o.bits)
   io.front.kill.valid := branchJump.kill.valid
-  io.front.kill.bits  := branchJump.feedback.bits.tgt
+  io.front.kill.bits  := branchJump.feedback.tgt
 
   val inner_kill = RegInit({
     val w = Wire(new KillInfo(wOrder, nBrchjr))
@@ -72,40 +72,10 @@ class BackEnd(implicit conf: CPUConfig) extends Module with BackParam {
   stateCtrl.split  := RegNext(!branchJump.kill.valid && io.front.pred.split)
   stateCtrl.bidx1H := branchJump.bid1H
   stateCtrl.bj_first := io.front.pred.brchjr(0)
-  val feedback = RegInit({
-    val w = Wire(new Bundle {
-      val valid = Bool()
-      val redirect = Bool()
-      val tgt = UInt(data_width.W)
-      val pc  = UInt(data_width.W)
-      val typ = UInt(BTBType.SZ.W)
-    })
-    w.valid := false.B
-    w.redirect := DontCare
-    w.tgt := DontCare
-    w.pc  := DontCare
-    w.typ := DontCare
-    w
-  })
-  io.front.feedback.valid := feedback.valid
-  io.front.feedback.bits.redirect := feedback.valid && feedback.redirect
-  io.front.feedback.bits.tgt := feedback.tgt
-  io.front.fb_type := feedback.typ
-  io.front.fb_pc   := feedback.pc
 
-  val feedback_valid = (0 until nInst).map(i => Pulse(io.front.pred.rectify(i), io.front.inst(i).ready)).reduce(_||_)
-  feedback.valid := branchJump.feedback.valid || feedback_valid
-  when (branchJump.feedback.valid && (branchJump.kill.valid || !feedback_valid)) {
-    feedback.pc    := branchJump.fb_pc
-    feedback.tgt   := branchJump.feedback.bits.tgt
-    feedback.redirect := branchJump.feedback.bits.redirect
-    feedback.typ   := branchJump.fb_type
-  }.elsewhen(feedback_valid) {
-    feedback.pc    := Mux(io.front.pred.rectify(0), io.front.pc(0), io.front.pc(1))
-    feedback.tgt   := io.front.pred.tgt
-    feedback.redirect := io.front.pred.redirect
-    feedback.typ   := (io.front.pred.redirect && io.front.pred.branch).asUInt
-  }
+  io.front.feedback := branchJump.feedback
+  io.front.fb_type  := branchJump.fb_type
+  io.front.fb_pc    := branchJump.fb_pc
 
   for (i <- 0 until nInst) {
     stateCtrl.logic(i).rs := instDecoder(i).rs
@@ -209,8 +179,11 @@ class BackEnd(implicit conf: CPUConfig) extends Module with BackParam {
   branchJump.in.bits.brtype := Mux(in_bjr(0), instDecoder(0).br_type, instDecoder(1).br_type)
   branchJump.in.bits.cont := branchJump.in.bits.pc + 4.U
   branchJump.in.bits.branch := io.front.pred.branch
+  branchJump.in.bits.retn   := io.front.pred.retn
   branchJump.in.bits.redirect := io.front.pred.redirect
-  branchJump.in.bits.tgt := io.front.pred.tgt
+  branchJump.in.bits.tgt  := io.front.pred.tgt
+  branchJump.in.bits.diff := io.front.pred.diff
+  branchJump.in.bits.history := io.front.pred.history
 
   loadStore.kill.valid := inner_kill.valid
   loadStore.kill.bits  := inner_kill.id
@@ -347,8 +320,8 @@ class BackEnd(implicit conf: CPUConfig) extends Module with BackParam {
     exe_inst_val(i) := exe_reg_issue(i).valid && !RegNext(stateCtrl.xcpt_o.valid) &&
       !(inner_kill.valid && CmpId(inner_kill.id, exe_reg_issue(i).id, stateCtrl.head, wOrder-1))
 
-    exe_alu_data(i) := (exe_reg_issue(i).info.data(1) &
-       Fill(data_width, exe_reg_d_sel(i)(1)(IMM) || exe_reg_issue(i).mem_en)) |
+    exe_alu_data(i) :=
+      (Fill(data_width, exe_reg_d_sel(i)(1)(IMM) || exe_reg_issue(i).mem_en) & exe_reg_issue(i).data_1) |
       (Fill(data_width, exe_reg_d_sel(i)(1)(REG) && !exe_reg_issue(i).mem_en) & exe_rs_data(i)(1))
   }
   val alu = Array.fill(nALU)(Module(new ALU).io)
@@ -497,13 +470,15 @@ class BackEnd(implicit conf: CPUConfig) extends Module with BackParam {
 //  csr.io.pc       :=
   csr.io.xcpt     := false.B //stateCtrl.xcpt_o.valid
   when (csr.io.rw.cmd =/= CSR.N) {
-    printf("CSR: Cyc= %d addr %x wdata %x cmd %x pc %x xcpt %x\n",
+    printf("CSR: Cyc= %d addr %x wdata %x cmd %x pc %x xcpt %x eret %x evec %x\n",
       io.cyc,
       csr.io.rw.addr,
       csr.io.rw.wdata,
       csr.io.rw.cmd,
       csr.io.pc,
-      csr.io.xcpt)
+      csr.io.xcpt,
+      csr.io.eret,
+      csr.io.evec)
   }
 
   for (i <- 0 until nInst) {
@@ -519,7 +494,7 @@ class BackEnd(implicit conf: CPUConfig) extends Module with BackParam {
       Mux(instQueue(i).in.valid, io.front.inst(i).bits, BUBBLE))
   }
 
-//  when (CycRange(io.cyc, 700, 800)) {
+  when (CycRange(io.cyc, 810, 812)) {
 //    printf(p"xcpt ${stateCtrl.xcpt_o.valid} ${Hexadecimal(io.front.xcpt.bits)}\n")
 //    for (i <- 0 until nInst) {
 //      printf(p"exe_inst_$i: ${exe_reg_issue(i).valid} ${exe_reg_issue(i).id} ${exe_reg_issue(i).info.f1} ")
@@ -562,15 +537,17 @@ class BackEnd(implicit conf: CPUConfig) extends Module with BackParam {
 //      p"self_ready ${exe_reg_issue(1).rs(0).valid} ${exe_reg_issue(1).rs(1).valid} " +
 //      p"rs1 ${exe_reg_issue(1).rs(0).addr} " +
 //      p"rs2 ${exe_reg_issue(1).rs(1).addr}\n")
-//    printf(p"exe stage: " +
-////      p"op_data0 ${Hexadecimal(exe_op_data(1)(0))} " +
-//      p"info_data0 ${Hexadecimal(exe_op_data(0)(0))} " +
-//      p"info_data1 ${Hexadecimal(exe_op_data(0)(1))} " +
+    printf(p"exe stage: " +
+      p"op_data0 ${Hexadecimal(exe_op_data(1)(0))} " +
+      p"op_data1 ${Hexadecimal(exe_op_data(1)(1))} " +
+      p"alu_data1 ${Hexadecimal(exe_alu_data(1))} " +
+      p"info_data1 ${Hexadecimal(exe_reg_issue(1).info.data(1))} " +
 //      p"ready ${instQueue(0).issue.ready} " +
-//      p"id ${exe_reg_issue(0).id} " +
-//      p"sel_0 ${exe_reg_d_sel(0)(0)(REG)} " +
-//      p"sel_1 ${exe_reg_d_sel(0)(1)(REG)}" +
-//      p"\n")
+      p"id ${exe_reg_issue(1).id} " +
+      p"id ${self_limit(1)} " +
+      p"sel_0 ${exe_reg_d_sel(1)(0)(REG)} " +
+      p"sel_1 ${exe_reg_d_sel(1)(1)(REG)}" +
+      p"\n")
 ////    for (i <- 0 until nInst) {
 //      printf(
 //        p"issueQvalid ${issueQueue(1).issue.valid} " +
@@ -603,5 +580,5 @@ class BackEnd(implicit conf: CPUConfig) extends Module with BackParam {
 //      //      p"sel0 ${exe_reg_d_sel(1)(0)(REG)} " +
 //      //      p"sel1 ${exe_reg_d_sel(1)(1)(IMM)}" +
 //      p"\n")
-//  }
+  }
 }

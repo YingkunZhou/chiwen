@@ -191,6 +191,7 @@ class StateCtrl extends Module with BackParam {
     CmpId(io.xcpt_i.id, xcpt.id, reorder.head(0), wOrder-1))) {
     xcpt.id := io.xcpt_i.id
   }
+
   io.xcpt_o.valid := order_ctrl.flush(0)
   io.xcpt_o.bits  := id_pc(io.head(wOrder-2,0))
   for (i <- 0 until nCommit) {

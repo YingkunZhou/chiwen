@@ -4,20 +4,14 @@ import chisel3._
 import chisel3.util.{Cat, Fill}
 import common.{AxiIO, CPUConfig, CycRange}
 
-class PredictInfo(data_width: Int) extends Predict(data_width) {
+class PredictInfo(data_width: Int)
+  extends Predict(data_width) {
   val brchjr  = Vec(2, Bool()) //determine pick which btb
-  val rectify = Vec(2, Bool())
   val branch  = Bool()
   val is_jal  = Bool()
   def Brchjr(i: Int): Bool = brchjr(i) && !is_jal
-  val split   = Bool() //mainly caused by jal
-}
-
-class PredictReg(val inst_width: Int, data_width: Int)
-  extends PredictInfo(data_width) {
-  val pc = UInt(data_width.W)
-  val imm = UInt((inst_width-7).W)
-  val update = Bool()
+  val split   = Bool() //cause by rectify
+  val retn    = Bool()
 }
 
 class BrjrEntryIO(val id_width: Int, data_width: Int)
@@ -26,10 +20,11 @@ class BrjrEntryIO(val id_width: Int, data_width: Int)
   val pc = UInt(data_width.W)
   val cont = UInt(data_width.W)
   val branch = Bool()
+  val retn   = Bool()
   val brtype = UInt(BR_N.getWidth.W)
 }
 
-class FrontEnd(implicit conf: CPUConfig) extends Module with BTBParams {
+class FrontEnd(implicit conf: CPUConfig) extends Module {
   val io = IO(new Bundle{
     val cyc      = Input(UInt(conf.xprlen.W))
     val mem      = new AxiIO(conf.xprlen)
@@ -38,111 +33,165 @@ class FrontEnd(implicit conf: CPUConfig) extends Module with BTBParams {
   /*TODO List
   * add more complex predict strategy
   * */
-//  val ras      = Module(new RAS(nRAS)).io
-  val btb      = Module(new BTB).io
+  val predict  = Module(new BTB).io
   val fetchi   = Module(new FetchInst).io
-  val microDec = Array.fill(2)(Module(new MicroDecoder(conf.inst_width)).io)
-  val queue  = Module(new FrontQueue).io
-  btb.cyc    := io.cyc
-  fetchi.cyc := io.cyc
-  queue.cyc  := io.cyc
-  queue.xcpt := io.back.xcpt
-  queue.kill := io.back.kill
-  io.back.inst <> queue.inst
-  io.back.pc   := queue.pc
-  io.back.pred := queue.pred
-
-  val calc_tgt = Wire(Vec(conf.nInst, Bool()))
-  val dec_isbj = Wire(Vec(conf.nInst, Bool()))
-  val btb_miss = Wire(Vec(conf.nInst, Bool()))
+  val ftQueue  = Module(new FrontQueue).io
+  predict.cyc  := io.cyc
+  fetchi.cyc   := io.cyc
+  ftQueue.cyc  := io.cyc
+  ftQueue.xcpt := io.back.xcpt
+  ftQueue.kill := io.back.kill
+  io.back.inst <> ftQueue.inst
+  io.back.pc   := ftQueue.pc
+  io.back.pred := ftQueue.pred
+  /*four case to rectify
+  * 1. jal inst
+  * 2. unpredict branch inst or branch target error
+  * 3. btb error to cause not branch jump inst redirect
+  * 4. retn inst not redirect
+  * */
   val rectify = Wire(new Bundle {
-    val valid = Vec(2, Bool())
-    def redirect: Bool = valid.reduce(_||_)
-    val miss = Bool()
+    val valid = Vec(conf.nInst, Bool())
+    val redir = Vec(conf.nInst, Bool())
     val imm = UInt(conf.data_width.W)
     val tgt = UInt(conf.data_width.W)
+    val pc  = UInt(conf.data_width.W)
+    val jump_diff = Bool()
+    val retn_diff = Bool()
+    val kill_valid = Bool()
+    val kill_bits  = UInt(conf.data_width.W)
+    def kill: Bool = valid.reduce(_||_)
   })
-  val dec_kill = Pulse(rectify.redirect, queue.forward) //FIXME ??? is it right???
-  val dec_miss = (0 until conf.nInst).map(i => Pulse(btb_miss(i), queue.forward))
-  val if_reg_pc   = RegInit(START_ADDR)
   val if_next_pc  =
-        Mux(io.back.xcpt.valid, io.back.xcpt.bits,
-        Mux(io.back.kill.valid, io.back.kill.bits,
-        Mux(dec_kill,      rectify.tgt,
-        Mux(dec_miss(0),   fetchi.dec_pc(1),
-        Mux(dec_miss(1),   fetchi.dec_pc(1) + 4.U,
-        Mux(btb.split,     btb.predict(0).bits.tgt,
-        /*predictor*/      btb.predict(1).bits.tgt))))))
-
+    Mux(io.back.xcpt.valid, io.back.xcpt.bits,
+    Mux(io.back.kill.valid, io.back.kill.bits,
+    Mux(rectify.kill_valid, rectify.kill_bits,
+    Mux(predict.split,      predict.predict(0).tgt,
+                            predict.predict(1).tgt)
+    )))
+  val if_reg_pc = RegInit(START_ADDR)
   when (fetchi.pc_forward) { if_reg_pc := if_next_pc }
-
-  btb.if_pc    := if_reg_pc
-  btb.fb_pc    := io.back.fb_pc
-  btb.fb_type  := io.back.fb_type
-  btb.feedBack := io.back.feedback
-
+  def BRJUMP: UInt = "b110".U
+  def BRANCH: UInt = "b11000".U
+  val brjump = fetchi.inst.map(_.bits(6,4) === BRJUMP)
+  val branch = fetchi.inst.map(_.bits(6,2) === BRANCH)
+  val select = fetchi.inst(0).valid && brjump(0)
+  val stall  = fetchi.inst(1).valid && brjump(1) && select
   fetchi.mem      <> io.mem
   fetchi.pc       := if_reg_pc
-  fetchi.pc_split := btb.split
-  fetchi.if_btb   := btb.predict
-  fetchi.dec_kill := io.back.kill.valid || io.back.xcpt.valid || dec_kill
-  fetchi.if_kill  := fetchi.dec_kill || dec_miss.reduce(_||_)
-  fetchi.inst_split := dec_miss(0)
-  fetchi.forward(0) := queue.forward
-  fetchi.forward(1) := queue.forward && !dec_isbj.reduce(_&&_)
+  fetchi.pc_split := predict.split
+  fetchi.if_btb   := predict.predict
+  fetchi.kill     := io.back.kill.valid || io.back.xcpt.valid || rectify.kill_valid
+  fetchi.forward(0) := ftQueue.forward
+  fetchi.forward(1) := ftQueue.forward && !stall
 
+  ftQueue.in.valid := fetchi.inst.map(_.valid).reduce(_||_) && !fetchi.kill
+  ftQueue.in.inst(0).valid := fetchi.inst(0).valid && !fetchi.kill
+  ftQueue.in.inst(1).valid := fetchi.inst(1).valid && !fetchi.kill &&
+    !(fetchi.inst(0).valid && Mux(brjump(0), brjump(1), fetchi.dec_btb(0).redirect))
+  for (i <- 0 until conf.nInst) ftQueue.in.inst(i).bits := fetchi.inst(i).bits
+
+  val front_reg = RegInit({
+    val w = Wire(new Bundle{
+      val valid   = Vec(conf.nInst, Bool())
+      val brchjr  = Vec(conf.nInst, Bool())
+      val fault   = Vec(conf.nInst, Bool())
+      val predict = new PredictVal(conf.data_width)
+      val branch  = Bool()
+      val inst    = UInt(conf.inst_width.W)
+      val pc      = UInt(conf.data_width.W)
+      def btb_error(i: Int): Bool = valid(i) && fault(i)
+      def bj_valid(i: Int): Bool = valid(i) && brchjr(i)
+      def bj_enable: Bool = (valid.asUInt & brchjr.asUInt).orR
+      def pc_split: Bool = valid.reduce(_&&_) && brchjr(0) && predict.redirect
+    })
+    w.valid   := Seq.fill(conf.nInst)(false.B)
+    w.brchjr  := DontCare
+    w.fault   := DontCare
+    w.predict := DontCare
+    w.branch  := DontCare
+    w.inst    := DontCare
+    w.pc      := DontCare
+    w
+  })
+  when (io.back.xcpt.valid || io.back.kill.valid) {
+    for (i <- 0 until conf.nInst) front_reg.valid(i) := false.B
+  }.elsewhen (ftQueue.forward) {
+    front_reg.valid   := ftQueue.in.inst.map(_.valid)
+    front_reg.brchjr  := brjump
+    front_reg.fault   := (0 until 2).map(i => !brjump(i) && fetchi.dec_btb(i).redirect)
+
+    front_reg.branch  := Mux(select, branch(0), branch(1))
+    front_reg.predict := Mux(select, fetchi.dec_btb(0),     fetchi.dec_btb(1))
+    front_reg.inst    := Mux(select, fetchi.inst(0).bits,   fetchi.inst(1).bits)
+    front_reg.pc      := Mux(select, fetchi.dec_pc(0),      fetchi.dec_pc(1))
+  }
+
+  val decoder = Module(new MicroDecoder(conf.inst_width)).io
+  decoder.inst := front_reg.inst
+  val front_feedback = Wire(new PredictVal(conf.data_width))
+  front_feedback.valid := rectify.kill_valid
+  front_feedback.tgt   := Mux(front_reg.branch || decoder.is_jal, rectify.tgt, predict.peek)
+  front_feedback.diff  := false.B
+  front_feedback.redirect := decoder.is_jal || decoder.retn || front_reg.branch
+  front_feedback.history  := front_reg.predict.history
+
+  predict.if_pc.valid := fetchi.pc_forward
+  predict.if_pc.bits  := if_reg_pc
+
+  predict.fb_pc.valid := io.back.kill.valid || rectify.kill_valid
+  predict.fb_pc.bits  := Mux(io.back.kill.valid && !rectify.kill_valid, io.back.fb_pc,
+    Cat(front_reg.pc(conf.data_width-1,conf.pcLSB+1), !rectify.valid(0), 0.U(conf.pcLSB.W)))
+  predict.fb_type    := Mux(io.back.kill.valid && !rectify.kill_valid, io.back.fb_type,
+    Mux(front_reg.btb_error(0) || decoder.is_jal, BTBType.jump.U,
+    Mux(decoder.retn, BTBType.retn.U, BTBType.branch.U)))
+  predict.feedBack   := Mux(io.back.kill.valid && !rectify.kill_valid, io.back.feedback, front_feedback)
+  predict.branch     := Pulse(Mux(select, branch(0), branch(1) && fetchi.inst(1).valid), ftQueue.forward)
+  predict.retn       := ShakeHand(decoder.retn && front_reg.bj_enable, ftQueue.forward)
+  predict.call.valid := ShakeHand(decoder.call && front_reg.bj_enable, ftQueue.forward)
+  predict.call.bits  := Cat(front_reg.pc(conf.data_width-1,conf.pcLSB+1),front_reg.bj_valid(1),0.U(conf.pcLSB.W))+4.U
+
+  rectify.imm   := Mux(front_reg.branch,
+    Cat(Fill(20, front_reg.inst(31)), front_reg.inst(7), front_reg.inst(30, 25), front_reg.inst(11, 8), 0.U(1.W)),
+    Cat(Fill(12, front_reg.inst(31)), front_reg.inst(19,12), front_reg.inst(20), front_reg.inst(30,21), 0.U(1.W)))
+  rectify.tgt   := front_reg.pc + rectify.imm
+  rectify.jump_diff  := rectify.tgt =/= front_reg.predict.tgt //TO AVOID BTB ERROR
+  rectify.retn_diff  := predict.peek =/= front_reg.predict.tgt
   for (i <- 0 until conf.nInst) {
-    microDec(i).inst := fetchi.inst(i).bits
-//    calc_tgt(i) := microDec(i).isjal || (microDec(i).branch &&
-//    (fetchi.dec_btb(i).bits.redirect || !fetchi.dec_btb(i).valid))
-    calc_tgt(i) := microDec(i).isjal || (microDec(i).branch && fetchi.dec_btb(i).bits.redirect)
-
-    dec_isbj(i) := fetchi.inst(i).valid &&  microDec(i).is_bj
-    btb_miss(i) := fetchi.inst(i).valid && !microDec(i).is_bj && fetchi.dec_btb(i).bits.redirect
-    queue.in.inst(i).bits  := fetchi.inst(i).bits
-    queue.in.inst(i).valid := fetchi.inst(i).valid && !fetchi.dec_kill
+    rectify.redir(i) := front_reg.bj_valid(i) && (
+      (decoder.retn     && rectify.retn_diff) ||
+      (decoder.is_jal   && rectify.jump_diff) ||
+      (front_reg.branch && Mux(front_reg.predict.redirect, rectify.jump_diff, !front_reg.predict.valid)))
+    rectify.valid(i) := rectify.redir(i) || front_reg.btb_error(i)
   }
-
-  val pred_valid = RegInit(VecInit(Seq.fill(conf.nInst)(false.B)))
-  val pred_reg = Reg(new PredictReg(conf.inst_width, conf.data_width))
-  val rectify_reg = Reg(Vec(conf.nInst, Bool()))
-
-  when (queue.forward) {
-    pred_valid       := queue.in.inst.map(_.valid)
-    pred_reg.brchjr  := microDec.map(_.is_bj)
-    rectify_reg      := calc_tgt
-    pred_reg.rectify := btb_miss
-
-    pred_reg.redirect := Mux(dec_isbj(0), fetchi.dec_btb(0).bits.redirect,
-                             dec_isbj(1) && fetchi.dec_btb(1).bits.redirect)
-
-    pred_reg.tgt    := Mux(dec_isbj(0), fetchi.dec_btb(0).bits.tgt, fetchi.dec_btb(1).bits.tgt)
-    pred_reg.update := Mux(dec_isbj(0), microDec(0).brchj, microDec(1).brchj)
-    pred_reg.branch := Mux(dec_isbj(0), microDec(0).branch, microDec(1).branch)
-    pred_reg.is_jal := Mux(dec_isbj(0), microDec(0).isjal , microDec(1).isjal)
-
-    pred_reg.imm    := Mux(dec_isbj(0), fetchi.inst(0).bits(31,7), fetchi.inst(1).bits(31,7))
-    pred_reg.pc     := Mux(dec_isbj(0), fetchi.dec_pc(0), fetchi.dec_pc(1))
-    pred_reg.split  := fetchi.inst_split
+  rectify.pc := Cat(front_reg.pc(conf.data_width-1,conf.pcLSB+1), 1.U(1.W), 0.U(conf.pcLSB.W))
+  rectify.kill_valid := Pulse(rectify.kill, ftQueue.forward)
+  rectify.kill_bits  := Mux(front_reg.btb_error(0) , rectify.pc,
+    Mux(front_feedback.redirect, front_feedback.tgt,
+    Mux(front_reg.pc_split, front_reg.predict.tgt, rectify.pc) + 4.U))
+  //within valid
+  ftQueue.in.pred.redirect := rectify.redir.reduce(_||_) || (front_reg.predict.redirect && front_reg.bj_enable)
+  ftQueue.in.pred.split    := rectify.valid(0)
+  //without valid
+  ftQueue.in.pred.tgt      := Mux(front_feedback.redirect, front_feedback.tgt, front_reg.predict.tgt)
+  ftQueue.in.pred.brchjr   := front_reg.brchjr
+  ftQueue.in.pred.branch   := front_reg.branch
+  ftQueue.in.pred.is_jal   := decoder.is_jal
+  ftQueue.in.pred.history  := front_reg.predict.history
+  ftQueue.in.pred.diff     := front_reg.predict.diff
+  ftQueue.in.pred.retn     := decoder.retn
+  when (CycRange(io.cyc, 2013, 2015)) {
+    for (i <- 0 until conf.nInst) {
+      printf("valid: %x->inst: DASM(%x) ", fetchi.inst(i).valid, fetchi.inst(i).bits)
+      printf(p"predict valid ${fetchi.dec_btb(i).valid} " +
+        p"redirect ${fetchi.dec_btb(i).redirect} " +
+        p"tgt ${Hexadecimal(fetchi.dec_btb(i).tgt)}\n")
+    }
+//    printf("%x\n", ftQueue.in.pred.tgt)
+    printf(p"forward ${ftQueue.forward} in_valid ${ftQueue.in.inst(0).valid} ${ftQueue.in.inst(1).valid}\n")
+    printf(p"${front_reg.valid} ${rectify.valid} ${rectify.kill_valid}->${Hexadecimal(rectify.kill_bits)} ")
+    printf(p"next pc ${Hexadecimal(if_next_pc)} ${Hexadecimal(if_reg_pc)}\n")
   }
-
-  rectify.imm   := Mux(pred_reg.branch,
-    Cat(Fill(20, pred_reg.imm(24)), pred_reg.imm(0), pred_reg.imm(23, 18), pred_reg.imm(4, 1), 0.U(1.W)),
-    Cat(Fill(12, pred_reg.imm(24)), pred_reg.imm(12,5), pred_reg.imm(13), pred_reg.imm(23,14), 0.U(1.W)))
-  rectify.tgt   := pred_reg.pc + rectify.imm
-  rectify.miss  := rectify.tgt =/= pred_reg.tgt
-  rectify.valid := (0 until conf.nInst).map(i => pred_valid(i) && rectify_reg(i) && rectify.miss) //around 24 gates
-
-  queue.in.pred.tgt      := Mux(pred_reg.update, rectify.tgt, pred_reg.tgt)
-  queue.in.pred.redirect := pred_reg.redirect || rectify.redirect
-  queue.in.pred.rectify  := (0 until conf.nInst).map(i => (pred_reg.rectify(i) && pred_valid(i)) || rectify.valid(i))
-  queue.in.pred.brchjr   := pred_reg.brchjr
-  queue.in.pred.branch   := pred_reg.branch
-  queue.in.pred.is_jal   := pred_reg.is_jal
-  queue.in.pred.split    := rectify.valid(0)
-  queue.in.pc_split   := pred_valid.reduce(_&&_) && pred_reg.brchjr(0) && pred_reg.redirect
-  //if both is brchjr inst or dec stage back inst occur split case then inst split it
-  queue.in.inst_split := (pred_valid(0) && pred_reg.brchjr.reduce(_&&_)) || pred_reg.split
 //  when (CycRange(io.cyc, 185764, 185765)) {
 //    printf(p"pc ${Hexadecimal(btb.if_pc)} btb predict ${btb.predict(0).valid}->" +
 //      p"<${btb.predict(0).bits.redirect}:${Hexadecimal(btb.predict(0).bits.tgt)}> ")
