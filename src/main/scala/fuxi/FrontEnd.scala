@@ -64,4 +64,12 @@ class FrontEnd(implicit conf: CPUConfig) extends Module with BTBParams {
   btb.feedBack := io.back.feedBack
   btb.ras_push := io.back.ras_push
   btb.ras_pop  := io.back.ras_pop
+  when (io.cyc === 5709.U) {
+    for (i <- 0 until conf.nInst) {
+      printf("valid: %x->inst: DASM(%x) ", fetchi.inst(i).valid, fetchi.inst(i).bits)
+      printf(
+        p"redirect ${fetchi.dec_btb(i).redirect} " +
+        p"tgt ${Hexadecimal(fetchi.dec_btb(i).tgt)}\n")
+    }
+  }
 }

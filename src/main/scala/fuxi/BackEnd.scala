@@ -412,24 +412,24 @@ class BackEnd(implicit conf: CPUConfig) extends Module with BTBParams {
   io.front.forward(1) := !stall(1)(Stage.DEC) && !stall(1)(Stage.EXE) && !stall(1)(Stage.MEM)
 
   // Printout
-//  for (i <- 0 until conf.nInst) {
-//    printf("Core: Cyc= %d PC(%x, %x, %x) [%c%c %c%c %c%c] %c%c %c%c Exe: DASM(%x)\n"
-//      , io.cyc
-//      , io.front.pc(i)
-//      , exe(i).pc
-//      , mem(i).pc
-//      , Mux(stall(i)(Stage.MEM), Str("M"), Str(" ")), Str(""+i)
-//      , Mux(stall(i)(Stage.EXE), Str("E"), Str(" ")), Str(""+i)
-//      , Mux(stall(i)(Stage.DEC), Str("D"), Str(" ")), Str(""+i)
-//      , Mux(alu(i).ctrl.pc_sel === 1.U, Str("B"),    //BJ -> B
-//        Mux(alu(i).ctrl.pc_sel === 2.U, Str("J"),    //JR -> J
-//        Mux(alu(i).ctrl.pc_sel === 3.U, Str("E"),    //EX -> E
-//        Mux(alu(i).ctrl.pc_sel === 0.U, Str(" "), Str("?"))))), Str(""+i)
-//      , Mux(csr.io.illegal, Str("X"), Str(" ")), Str(""+i)
-//      , Mux(!exe_valid(i) || xcpt.valid || (exe_cancel && i.U === 1.U) ||
-//        stall(1)(Stage.MEM) || (stall(1)(Stage.EXE) && i.U === 1.U), BUBBLE, exe(i).inst)
-//    )
-//  }
+  for (i <- 0 until conf.nInst) {
+    printf("Core: Cyc= %d PC(%x, %x, %x) [%c%c %c%c %c%c] %c%c %c%c Exe: DASM(%x)\n"
+      , io.cyc
+      , io.front.pc(i)
+      , exe(i).pc
+      , mem(i).pc
+      , Mux(stall(i)(Stage.MEM), Str("M"), Str(" ")), Str(""+i)
+      , Mux(stall(i)(Stage.EXE), Str("E"), Str(" ")), Str(""+i)
+      , Mux(stall(i)(Stage.DEC), Str("D"), Str(" ")), Str(""+i)
+      , Mux(alu(i).ctrl.pc_sel === 1.U, Str("B"),    //BJ -> B
+        Mux(alu(i).ctrl.pc_sel === 2.U, Str("J"),    //JR -> J
+        Mux(alu(i).ctrl.pc_sel === 3.U, Str("E"),    //EX -> E
+        Mux(alu(i).ctrl.pc_sel === 0.U, Str(" "), Str("?"))))), Str(""+i)
+      , Mux(csr.io.illegal, Str("X"), Str(" ")), Str(""+i)
+      , Mux(!exe_valid(i) || xcpt.valid || (exe_cancel && i.U === 1.U) ||
+        stall(1)(Stage.MEM) || (stall(1)(Stage.EXE) && i.U === 1.U), BUBBLE, exe(i).inst)
+    )
+  }
   for (i <- 0 until conf.nInst) {
     when (wb_valid(i)) {
       printf("Core: Cyc= %d WB[ %x %x %x]\n"

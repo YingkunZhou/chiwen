@@ -121,9 +121,9 @@ class BTB(implicit conf: CPUConfig) extends Module with BTBParams {
   io.peek := ras.peek
 
   val unpredict = Reg(Bool())
-  val b_predict = predict.map(_.branch).reduce(_||_)
+  val b_predict = (predict(0).branch && !io.if_pc.bits(conf.pcLSB).toBool) || predict(1).branch
   when (!io.fb_pc.valid && io.if_pc.valid) {unpredict := !b_predict}
-  val b_taken = Mux(predict(0).branch, predict(0).taken, predict(1).taken)
+  val b_taken = Mux(predict(0).branch && !io.if_pc.bits(conf.pcLSB).toBool, predict(0).taken, predict(1).taken)
   val b_shift = io.if_pc.valid && b_predict
   val l_shift = Cat(gb_history(wHistory-2,0), 0.U(1.W))
 
@@ -224,6 +224,30 @@ class BTB(implicit conf: CPUConfig) extends Module with BTBParams {
       arb(fb_reg.gshxor) := false.B
     }
   }
+
+  for (i <- 0 until conf.nInst) {
+    when (predict(i).valid && !(i.U === 0.U && io.if_pc.bits(conf.pcLSB).toBool) /*&& io.if_pc.bits === "h80005920".U*/) {
+      printf("BTB: Cyc= %d valid %x pc %x redirect %x index %d select %d gshare %d hcount %d bhtIdx %d <"
+        , io.cyc
+        , io.if_pc.valid
+        , Cat(if_pc(i), 0.U(conf.pcLSB.W))
+        , predict(i).redirect
+        , OHToUInt(predict(i).lookup)
+        , predict(i).select
+        , predict(i).gshare
+        , predict(i).h_count
+        , predict(i).gshxor
+      )
+      for (j <- 0 until 9) printf(p"${gb_history(j)},") //used for debug
+      printf(p"${gb_history(9)}>\n")
+    }
+  }
+//  when (CycRange(io.cyc, 218, 222)) {
+//    printf(p"BTB: Cyc= ${io.cyc} feedback ${io.feedBack.valid} fb_reg valid->${fb_reg.valid} exist->${feedback.valid} redirect->${fb_reg.redirect} \n")
+////    for (j <- 0 until 9) printf(p"${gb_history(j)},") //used for debug
+////    printf(p"${gb_history(9)}>\n")
+//   }
+
   //  when (CycRange(io.cyc, 900, 910)) {
   //    printf(p"cyc = ${io.cyc}\n" +
   //      p"pred_tgt ${Hexadecimal(io.predict.tgt)} " +

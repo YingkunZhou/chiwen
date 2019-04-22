@@ -2,7 +2,7 @@ package bian
 
 import chisel3._
 import chisel3.util.{Cat, Fill}
-import common.{AxiIO, CPUConfig, CycRange}
+import common.{AxiIO, CPUConfig, CycRange, Str}
 
 class PredictInfo(data_width: Int)
   extends Predict(data_width) {
@@ -135,17 +135,27 @@ class FrontEnd(implicit conf: CPUConfig) extends Module {
   front_feedback.diff  := false.B
   front_feedback.redirect := decoder.is_jal || decoder.retn || front_reg.branch
   front_feedback.history  := front_reg.predict.history
+  when (front_feedback.valid) {
+    printf("FrontEnd: Cyc= %d pc %x redirect %x type %c history %x\n"
+    , io.cyc
+    , predict.fb_pc.bits
+    , front_feedback.redirect
+    , Mux(predict.fb_type === BTBType.retn.U, Str("R"),
+      Mux(predict.fb_type === BTBType.jump.U, Str("J"), Str("B")))
+    , front_feedback.history
+    )
+  }
 
   predict.if_pc.valid := fetchi.pc_forward
   predict.if_pc.bits  := if_reg_pc
 
   predict.fb_pc.valid := io.back.kill.valid || rectify.kill_valid
-  predict.fb_pc.bits  := Mux(io.back.kill.valid && !rectify.kill_valid, io.back.fb_pc,
+  predict.fb_pc.bits  := Mux(io.back.kill.valid || !rectify.kill_valid, io.back.fb_pc,
     Cat(front_reg.pc(conf.data_width-1,conf.pcLSB+1), !rectify.valid(0), 0.U(conf.pcLSB.W)))
-  predict.fb_type    := Mux(io.back.kill.valid && !rectify.kill_valid, io.back.fb_type,
+  predict.fb_type    := Mux(io.back.kill.valid || !rectify.kill_valid, io.back.fb_type,
     Mux(front_reg.btb_error(0) || decoder.is_jal, BTBType.jump.U,
     Mux(decoder.retn, BTBType.retn.U, BTBType.branch.U)))
-  predict.feedBack   := Mux(io.back.kill.valid && !rectify.kill_valid, io.back.feedback, front_feedback)
+  predict.feedBack   := Mux(io.back.kill.valid || !rectify.kill_valid, io.back.feedback, front_feedback)
   predict.branch     := Pulse(Mux(select, branch(0), branch(1) && fetchi.inst(1).valid), ftQueue.forward)
   predict.retn       := ShakeHand(decoder.retn && front_reg.bj_enable, ftQueue.forward)
   predict.call.valid := ShakeHand(decoder.call && front_reg.bj_enable, ftQueue.forward)
@@ -180,18 +190,18 @@ class FrontEnd(implicit conf: CPUConfig) extends Module {
   ftQueue.in.pred.history  := front_reg.predict.history
   ftQueue.in.pred.diff     := front_reg.predict.diff
   ftQueue.in.pred.retn     := decoder.retn
-  when (CycRange(io.cyc, 2013, 2015)) {
-    for (i <- 0 until conf.nInst) {
-      printf("valid: %x->inst: DASM(%x) ", fetchi.inst(i).valid, fetchi.inst(i).bits)
-      printf(p"predict valid ${fetchi.dec_btb(i).valid} " +
-        p"redirect ${fetchi.dec_btb(i).redirect} " +
-        p"tgt ${Hexadecimal(fetchi.dec_btb(i).tgt)}\n")
-    }
-//    printf("%x\n", ftQueue.in.pred.tgt)
-    printf(p"forward ${ftQueue.forward} in_valid ${ftQueue.in.inst(0).valid} ${ftQueue.in.inst(1).valid}\n")
-    printf(p"${front_reg.valid} ${rectify.valid} ${rectify.kill_valid}->${Hexadecimal(rectify.kill_bits)} ")
-    printf(p"next pc ${Hexadecimal(if_next_pc)} ${Hexadecimal(if_reg_pc)}\n")
-  }
+//  when (CycRange(io.cyc, 2013, 2015)) {
+//    for (i <- 0 until conf.nInst) {
+//      printf("valid: %x->inst: DASM(%x) ", fetchi.inst(i).valid, fetchi.inst(i).bits)
+//      printf(p"predict valid ${fetchi.dec_btb(i).valid} " +
+//        p"redirect ${fetchi.dec_btb(i).redirect} " +
+//        p"tgt ${Hexadecimal(fetchi.dec_btb(i).tgt)}\n")
+//    }
+////    printf("%x\n", ftQueue.in.pred.tgt)
+//    printf(p"forward ${ftQueue.forward} in_valid ${ftQueue.in.inst(0).valid} ${ftQueue.in.inst(1).valid}\n")
+//    printf(p"${front_reg.valid} ${rectify.valid} ${rectify.kill_valid}->${Hexadecimal(rectify.kill_bits)} ")
+//    printf(p"next pc ${Hexadecimal(if_next_pc)} ${Hexadecimal(if_reg_pc)}\n")
+//  }
 //  when (CycRange(io.cyc, 185764, 185765)) {
 //    printf(p"pc ${Hexadecimal(btb.if_pc)} btb predict ${btb.predict(0).valid}->" +
 //      p"<${btb.predict(0).bits.redirect}:${Hexadecimal(btb.predict(0).bits.tgt)}> ")

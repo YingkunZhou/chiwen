@@ -2,7 +2,7 @@ package bian
 
 import chisel3._
 import chisel3.util._
-import common.CycRange
+import common.{CycRange, Str}
 
 trait BjParam extends BackParam {
   val nEntry = nBrchjr
@@ -267,21 +267,31 @@ class BranchJump extends Module with BjParam {
     }
   }
 
-  when (CycRange(io.cyc, 13700, 13742)) {
-    printf(p"pop_valid ${bj_ctrl.pop_valid} " +
-      p"pop_issue ${bj_ctrl.pop_issue}" +
-      p"pop_expect ${bj_ctrl.pop_entry.expect} " +
-      p"actual_vec ${bj_ctrl.actual} " +
-      p"\n")
-    for (i <- 0 until 3) {
-      printf(
-        p"issue valid ${io.issue(i).valid} " +
-          p"id ${io.issue(i).id} " +
-          p"branch ${io.issue(i).branch} " +
-          p"actual ${io.issue(i).actual} " +
-          p"brtype ${io.brtype(i)} " +
-          p"hit ${bj_ctrl.valid(i)}\n")
-    }
+  when (io.feedback.valid) {
+    printf("BranchJump: Cyc= %d kill %x pc %x redirect %x id %d type %c\n"
+    , io.cyc
+    , io.kill.valid
+    , io.fb_pc
+    , io.feedback.redirect
+    , io.kill.id
+    , Mux(io.fb_type === BTBType.retn.U, Str("R"),
+      Mux(io.fb_type === BTBType.jump.U, Str("J"), Str("B"))))
+  }
+//  when (CycRange(io.cyc, 13700, 13742)) {
+//    printf(p"pop_valid ${bj_ctrl.pop_valid} " +
+//      p"pop_issue ${bj_ctrl.pop_issue}" +
+//      p"pop_expect ${bj_ctrl.pop_entry.expect} " +
+//      p"actual_vec ${bj_ctrl.actual} " +
+//      p"\n")
+//    for (i <- 0 until 3) {
+//      printf(
+//        p"issue valid ${io.issue(i).valid} " +
+//          p"id ${io.issue(i).id} " +
+//          p"branch ${io.issue(i).branch} " +
+//          p"actual ${io.issue(i).actual} " +
+//          p"brtype ${io.brtype(i)} " +
+//          p"hit ${bj_ctrl.valid(i)}\n")
+//    }
 //    printf(p"output: " +
 //      p"ready->${io.in.ready} " +
 //      p"bid1H->${io.bid1H} " +
@@ -304,18 +314,18 @@ class BranchJump extends Module with BjParam {
 //      p"\n")
 //    printf(p"bj_ctrl: update->${bj_ctrl.update} actual->${bj_ctrl.actual} forward->${bj_ctrl.forward} tail->${bj_ctrl.tail} " +
 //      p"fwd_ptr->${bj_ctrl.fwd_ptr} fwd_kill->${bj_ctrl.fwd_kill}\n")
-    printf(
-      p" in_valid ${io.in.valid} " +
-      p"forward ${bj_reg.forward} " +
-      p"fwd_kill ${bj_reg.fwd_kill} " +
-      p"fwd_id ${bj_reg.fwd_id} " +
-      p"head_id ${bj_ctrl.head_id} ")
-    printf(p"counter: ${bj_reg.count} table_valid:")
-    for (i <- 0 until nEntry) printf(p" ${bj_valid(i).valid}->${bj_valid(i).bits}")
-    printf(p" queue:")
-    for (i <- 0 until nEntry) printf(p" ${bj_queue(i).valid}->${bj_queue(i).id}")
-    printf("\n")
-  }
+//    printf(
+//      p" in_valid ${io.in.valid} " +
+//      p"forward ${bj_reg.forward} " +
+//      p"fwd_kill ${bj_reg.fwd_kill} " +
+//      p"fwd_id ${bj_reg.fwd_id} " +
+//      p"head_id ${bj_ctrl.head_id} ")
+//    printf(p"counter: ${bj_reg.count} table_valid:")
+//    for (i <- 0 until nEntry) printf(p" ${bj_valid(i).valid}->${bj_valid(i).bits}")
+//    printf(p" queue:")
+//    for (i <- 0 until nEntry) printf(p" ${bj_queue(i).valid}->${bj_queue(i).id}")
+//    printf("\n")
+//  }
 
 //  val cnt = RegInit(0.U(32.W))
 //  cnt := cnt + 1.U

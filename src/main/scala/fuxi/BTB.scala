@@ -43,7 +43,7 @@ class PredictInner(val data_width: Int) extends Bundle with BTBParams {
   val gshxor  = UInt(log2Ceil(nBHT).W)
   val select  = Bool()
   val bj_type = UInt(BTBType.SZ.W)
-  def branch: Bool = valid && bj_type === BTBType.branch.U
+  def branch: Bool = bj_type === BTBType.branch.U
   def taken: Bool  = Mux(select, gshare(1), h_count(1))
   def diff: Bool   = gshare(1) ^ h_count(1) // && !select
   def redirect: Bool = valid && (bj_type =/= BTBType.branch.U || taken)
@@ -129,10 +129,10 @@ class BTB(implicit conf: CPUConfig) extends Module with BTBParams {
       gb_history := io.feedBack.history
     }
   }.elsewhen(io.if_pc.valid) {
-    shift_reg := !predict.map(_.branch).reduce(_||_)
+    shift_reg := !(predict(0).branch && !io.if_pc.bits(conf.pcLSB).toBool) && !predict(1).branch
     when (shift_wire) {
       gb_history := Cat(gb_history(wHistory-2,0), 0.U(1.W))
-    }.elsewhen(predict(0).branch) {
+    }.elsewhen(predict(0).branch && !io.if_pc.bits(conf.pcLSB).toBool) {
       when (predict(1).branch) {
         gb_history := Cat(predict(0).history(wHistory-2,0), predict(1).taken)
       }.otherwise {
@@ -234,7 +234,7 @@ class BTB(implicit conf: CPUConfig) extends Module with BTBParams {
 
   for (i <- 0 until conf.nInst) {
     when (predict(i).valid /*&& io.if_pc.bits === "h80005920".U*/) {
-      printf("BTB: Cyc= %d valid %x pc %x redirect %x index %d select %d gshare %d hcount %d bhtIdx %d"
+      printf("BTB: Cyc= %d valid %x pc %x redirect %x index %d select %d gshare %d hcount %d bhtIdx %d <"
         , io.cyc
         , io.if_pc.valid
         , Cat(if_pc(i), 0.U(conf.pcLSB.W))
@@ -245,8 +245,8 @@ class BTB(implicit conf: CPUConfig) extends Module with BTBParams {
         , predict(i).h_count
         , predict(i).gshxor
       )
-      //for (i <- 0 until 10) printf(p" ${gb_history(i)}") used for debug
-      printf("\n")
+      for (i <- 0 until 9) printf(p" ${gb_history(i)}") //used for debug
+      printf(p"${gb_history(9)}\n")
     }
   }
   //  when (CycRange(io.cyc, 900, 910)) {

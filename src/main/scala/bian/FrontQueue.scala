@@ -175,11 +175,7 @@ class FrontQueue(implicit val conf: CPUConfig) extends Module with FrontParam {
   io.pc(1) := Mux(pc_split, head_pred.tgt,
     Cat(pred_ctrl.pc(conf.inst_width-1, conf.pcLSB+1), 1.U(1.W), 0.U(conf.pcLSB.W)))
 
-  when (CycRange(io.cyc, 2013, 2014)) {
-    printf(p"kill: ${io.kill.valid}->${Hexadecimal(io.kill.bits)}\n")
-  }
-
-    //  when (CycRange(io.cyc, 185766, 185766)) {
+//  when (CycRange(io.cyc, 185766, 185766)) {
 //    printf(p"FroneQueue: " +
 //      p"head ${inst_ptr(H)} tail ${inst_ptr(T)} " +
 ////      p"output redirect ${io.pred.redirect} " +

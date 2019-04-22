@@ -625,67 +625,67 @@ class LoadStore extends Module with LsParam {
   io.mem.req.bits.addr:= Mux(mem.store, store_queue.head_addr,
     Mux(mem.fwd_fcn === M_XWR, store_queue.addr, load_queue.addr))
 
-  when (CycRange(io.cyc,810, 824)) {
-//    printf(
-//      p"kill valid ${io.kill.valid} " +
-//        p"kill id ${io.kill.bits} " +
-//        p"kill cmp${VecInit(store_ctrl.kill.const)} " +
-//        p"${store_ctrl.kill_ptr} " +
-//        p"${store_ctrl.kill.valid(store_queue.valid)} " +
-//        p"${VecInit(store_queue.valid)}\n")
-    for (i <- 0 until 3) {
-      printf(p"${io.issue(i).valid}->${io.issue(i).id} ${Hexadecimal(io.issue(i).addr)} ")
-    }
-    printf("\n")
-    when (io.mem.req.valid) {
-      when (io.mem.req.bits.fcn === M_XWR) {
-        printf("STORE id %d [ %x %x %x]\n",
-          store_queue.head_id,
-          io.mem.req.bits.typ,
-          io.mem.req.bits.addr,
-          io.mem.req.bits.data)
-      }.otherwise {
-        printf("LOAD id %d [ %x %x]\n",
-          Mux(mem.fwd_fcn === M_XWR, store_queue.id, load_queue.id),
-          io.mem.req.bits.typ,
-          io.mem.req.bits.addr)
-      }
-    }
-    printf(p"LoadStore input: " +
-      p"kill ${io.kill.valid}->${io.kill.bits} " +
-      p"valid ${io.in(0).valid} ${io.in(1).valid} " +
-      p"head ${io.head} " +
-      p"issuable ${io.issueable.valid}->${io.issueable.bits} " +
-      p"limit ${io.limit.valid}->${io.limit.bits} " +
-//      p"req_ready ${io.mem.req.ready} " +
-//      p"head_id ${store_queue.head_id} " +
-      p"store ${mem.store} " +
-      p"ld/st ${queue.head} ${queue.tail} " +
-      p"data ${Hexadecimal(io.mem.resp.bits.data)} " +
-      p"\n")
-    printf(p"forward: ${mem_reg.forward}" +
-      p" ${mem_reg.fwd_valid}" +
-      p" ${mem_reg.fwd_mux1H}" +
-      p" ${mem.fwd_en} ${mem.byte_en}" +
-      p" ${mem.fwd_mux1H}" +
-      p" ${load_queue.unsafe(mem_reg.ld_ptr)}" +
-      p" ${mem.bwd_valid} " +
-      p" ${mem.backward.valid(mem.bwd_valid)} && ${store_queue.head_addr_ok}" +
-      p" ${load_queue.addr_eq(addr = store_queue.head_addr(data_width-1,2),
-        head = store_queue.head(wStore-1,0))}" +
-      p" ${Hexadecimal(store_queue.head_addr)}" +
-      p" ${Hexadecimal(store_queue.ls_addr(0))}" +
-//      p" addr_eq0 ${Hexadecimal(store_queue.ls_addr(0)(data_width-1,2))} " +
-//      p" ${Hexadecimal(mem.fwd_addr(data_width-1,2))} " +
-      p"\n")
-    printf(p"load: head ${load_queue.head} tail ${load_queue.tail} id")
-    for (i <- 0 until nLoad) printf(p" ${load_queue.addr_ok(i)},${load_queue.data_ok(i)}->${load_queue.ls_id(i)}")
-    printf("\n")
-    printf(p"store: head ${store_queue.head} tail ${store_queue.tail} id")
-    for (i <- 0 until nStore) printf(p" <${store_queue.addr_ok(i)},${store_queue.arready(i)},${store_queue.data_ok(i)}>" +
-      p"->${store_queue.ls_id(i)}")
-    printf("\n")
-  }
+//  when (CycRange(io.cyc,810, 824)) {
+////    printf(
+////      p"kill valid ${io.kill.valid} " +
+////        p"kill id ${io.kill.bits} " +
+////        p"kill cmp${VecInit(store_ctrl.kill.const)} " +
+////        p"${store_ctrl.kill_ptr} " +
+////        p"${store_ctrl.kill.valid(store_queue.valid)} " +
+////        p"${VecInit(store_queue.valid)}\n")
+//    for (i <- 0 until 3) {
+//      printf(p"${io.issue(i).valid}->${io.issue(i).id} ${Hexadecimal(io.issue(i).addr)} ")
+//    }
+//    printf("\n")
+//    when (io.mem.req.valid) {
+//      when (io.mem.req.bits.fcn === M_XWR) {
+//        printf("STORE id %d [ %x %x %x]\n",
+//          store_queue.head_id,
+//          io.mem.req.bits.typ,
+//          io.mem.req.bits.addr,
+//          io.mem.req.bits.data)
+//      }.otherwise {
+//        printf("LOAD id %d [ %x %x]\n",
+//          Mux(mem.fwd_fcn === M_XWR, store_queue.id, load_queue.id),
+//          io.mem.req.bits.typ,
+//          io.mem.req.bits.addr)
+//      }
+//    }
+//    printf(p"LoadStore input: " +
+//      p"kill ${io.kill.valid}->${io.kill.bits} " +
+//      p"valid ${io.in(0).valid} ${io.in(1).valid} " +
+//      p"head ${io.head} " +
+//      p"issuable ${io.issueable.valid}->${io.issueable.bits} " +
+//      p"limit ${io.limit.valid}->${io.limit.bits} " +
+////      p"req_ready ${io.mem.req.ready} " +
+////      p"head_id ${store_queue.head_id} " +
+//      p"store ${mem.store} " +
+//      p"ld/st ${queue.head} ${queue.tail} " +
+//      p"data ${Hexadecimal(io.mem.resp.bits.data)} " +
+//      p"\n")
+//    printf(p"forward: ${mem_reg.forward}" +
+//      p" ${mem_reg.fwd_valid}" +
+//      p" ${mem_reg.fwd_mux1H}" +
+//      p" ${mem.fwd_en} ${mem.byte_en}" +
+//      p" ${mem.fwd_mux1H}" +
+//      p" ${load_queue.unsafe(mem_reg.ld_ptr)}" +
+//      p" ${mem.bwd_valid} " +
+//      p" ${mem.backward.valid(mem.bwd_valid)} && ${store_queue.head_addr_ok}" +
+//      p" ${load_queue.addr_eq(addr = store_queue.head_addr(data_width-1,2),
+//        head = store_queue.head(wStore-1,0))}" +
+//      p" ${Hexadecimal(store_queue.head_addr)}" +
+//      p" ${Hexadecimal(store_queue.ls_addr(0))}" +
+////      p" addr_eq0 ${Hexadecimal(store_queue.ls_addr(0)(data_width-1,2))} " +
+////      p" ${Hexadecimal(mem.fwd_addr(data_width-1,2))} " +
+//      p"\n")
+//    printf(p"load: head ${load_queue.head} tail ${load_queue.tail} id")
+//    for (i <- 0 until nLoad) printf(p" ${load_queue.addr_ok(i)},${load_queue.data_ok(i)}->${load_queue.ls_id(i)}")
+//    printf("\n")
+//    printf(p"store: head ${store_queue.head} tail ${store_queue.tail} id")
+//    for (i <- 0 until nStore) printf(p" <${store_queue.addr_ok(i)},${store_queue.arready(i)},${store_queue.data_ok(i)}>" +
+//      p"->${store_queue.ls_id(i)}")
+//    printf("\n")
+//  }
 
 //  when (io.cyc === 15476.U) {
 //    for (i <- 0 until nEntry) printf(p" ${queue.entry(i).id}")

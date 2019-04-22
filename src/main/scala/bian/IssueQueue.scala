@@ -300,44 +300,44 @@ class IssueQueue(val nEntry: Int, val n: Int) extends Module with BackParam {
       }
     }
   }
-  if (n <= ALU3) {
-    when (CycRange(io.cyc,810, 824)) {
-      //    printf(
-      //      p"in fire->${io.in.fire} " +
-      //      p"in id->${io.in.bits.id} " +
-      //      p"in mem en->${io.in.bits.mem_en} " +
-      //      p"tidx->${issue_ctrl.tidx} " +
-      //      p"kill->${io.kill} " +
-      //      p"tail ready->${io.tail.ready} " +
-      //      p"tail valid->${io.tail.valid} " +
-      //      p"tail id->${io.tail.id} " +
-      //      p"in ready->${io.in.ready}\n")
-      //      p"data_ok->${issue.data_ok} " +
-      //      p"data_sel->${issue.data_sel}\n" +
-      //      p"info->${io.issue.bits.info}\n")
-      //    printf(p"entry->${issue.entry}\n")
-      printf(
-        p"issue_$n: " +
-        p"count ${issue.count} " +
-        p"tail ${issue.tail} " +
-        p"table_valid ${issue.valid} " +
-        p"queue_valid ${RegNext(issue_ctrl.valid)} " +
-        p"table_forward ${issue.forward} " +
-        p"queue_forward ${RegNext(issue_ctrl.forward)} " +
-        p"id ${issue.entry.id} " +
-//        p"ctrl: " +
-//        p"snoop ${issue_ctrl.snoop} " +
-//        p"mmacc ${issue_ctrl.mmacc_orR}->${issue_ctrl.mmacc}" +
-        p"kill ${io.kill.valid}->${io.kill.bits} ${issue_ctrl.tb_valid} ")
-      printf(p"\n$n io.in ${io.in.fire}->${io.in.bits.id} " +
-        p"issue_queue$n:")
-      for (j <- 0 until nEntry) printf(p" ${queue_valid(j)}->${issue_queue(j).id}")
-      printf(p" mmacc ${issue.mmacc}")
-      printf(p" issue_table$n:")
-      for (j <- 0 until nEntry) printf(p" ${issue_valid(j).valid}->${issue_valid(j).id}")
-      printf("\n")
-    }
-  }
+//  if (n <= ALU3) {
+//    when (CycRange(io.cyc,810, 824)) {
+//      //    printf(
+//      //      p"in fire->${io.in.fire} " +
+//      //      p"in id->${io.in.bits.id} " +
+//      //      p"in mem en->${io.in.bits.mem_en} " +
+//      //      p"tidx->${issue_ctrl.tidx} " +
+//      //      p"kill->${io.kill} " +
+//      //      p"tail ready->${io.tail.ready} " +
+//      //      p"tail valid->${io.tail.valid} " +
+//      //      p"tail id->${io.tail.id} " +
+//      //      p"in ready->${io.in.ready}\n")
+//      //      p"data_ok->${issue.data_ok} " +
+//      //      p"data_sel->${issue.data_sel}\n" +
+//      //      p"info->${io.issue.bits.info}\n")
+//      //    printf(p"entry->${issue.entry}\n")
+//      printf(
+//        p"issue_$n: " +
+//        p"count ${issue.count} " +
+//        p"tail ${issue.tail} " +
+//        p"table_valid ${issue.valid} " +
+//        p"queue_valid ${RegNext(issue_ctrl.valid)} " +
+//        p"table_forward ${issue.forward} " +
+//        p"queue_forward ${RegNext(issue_ctrl.forward)} " +
+//        p"id ${issue.entry.id} " +
+////        p"ctrl: " +
+////        p"snoop ${issue_ctrl.snoop} " +
+////        p"mmacc ${issue_ctrl.mmacc_orR}->${issue_ctrl.mmacc}" +
+//        p"kill ${io.kill.valid}->${io.kill.bits} ${issue_ctrl.tb_valid} ")
+//      printf(p"\n$n io.in ${io.in.fire}->${io.in.bits.id} " +
+//        p"issue_queue$n:")
+//      for (j <- 0 until nEntry) printf(p" ${queue_valid(j)}->${issue_queue(j).id}")
+//      printf(p" mmacc ${issue.mmacc}")
+//      printf(p" issue_table$n:")
+//      for (j <- 0 until nEntry) printf(p" ${issue_valid(j).valid}->${issue_valid(j).id}")
+//      printf("\n")
+//    }
+//  }
 
 //  val cnt = RegInit(0.U(32.W))
 //  cnt := cnt + 1.U

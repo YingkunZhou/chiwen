@@ -480,7 +480,6 @@ class BackEnd(implicit conf: CPUConfig) extends Module with BackParam {
       csr.io.eret,
       csr.io.evec)
   }
-
   for (i <- 0 until nInst) {
     printf("Core: Cyc= %d pc %x pair<%x %x> id %d rd %x:%x->%x rs [%x:%x->%x %x:%x->%x] inst: DASM(%x)\n",
       io.cyc,
@@ -494,7 +493,7 @@ class BackEnd(implicit conf: CPUConfig) extends Module with BackParam {
       Mux(instQueue(i).in.valid, io.front.inst(i).bits, BUBBLE))
   }
 
-  when (CycRange(io.cyc, 810, 812)) {
+//  when (CycRange(io.cyc, 810, 812)) {
 //    printf(p"xcpt ${stateCtrl.xcpt_o.valid} ${Hexadecimal(io.front.xcpt.bits)}\n")
 //    for (i <- 0 until nInst) {
 //      printf(p"exe_inst_$i: ${exe_reg_issue(i).valid} ${exe_reg_issue(i).id} ${exe_reg_issue(i).info.f1} ")
@@ -537,17 +536,17 @@ class BackEnd(implicit conf: CPUConfig) extends Module with BackParam {
 //      p"self_ready ${exe_reg_issue(1).rs(0).valid} ${exe_reg_issue(1).rs(1).valid} " +
 //      p"rs1 ${exe_reg_issue(1).rs(0).addr} " +
 //      p"rs2 ${exe_reg_issue(1).rs(1).addr}\n")
-    printf(p"exe stage: " +
-      p"op_data0 ${Hexadecimal(exe_op_data(1)(0))} " +
-      p"op_data1 ${Hexadecimal(exe_op_data(1)(1))} " +
-      p"alu_data1 ${Hexadecimal(exe_alu_data(1))} " +
-      p"info_data1 ${Hexadecimal(exe_reg_issue(1).info.data(1))} " +
-//      p"ready ${instQueue(0).issue.ready} " +
-      p"id ${exe_reg_issue(1).id} " +
-      p"id ${self_limit(1)} " +
-      p"sel_0 ${exe_reg_d_sel(1)(0)(REG)} " +
-      p"sel_1 ${exe_reg_d_sel(1)(1)(REG)}" +
-      p"\n")
+//    printf(p"exe stage: " +
+//      p"op_data0 ${Hexadecimal(exe_op_data(1)(0))} " +
+//      p"op_data1 ${Hexadecimal(exe_op_data(1)(1))} " +
+//      p"alu_data1 ${Hexadecimal(exe_alu_data(1))} " +
+//      p"info_data1 ${Hexadecimal(exe_reg_issue(1).info.data(1))} " +
+////      p"ready ${instQueue(0).issue.ready} " +
+//      p"id ${exe_reg_issue(1).id} " +
+//      p"id ${self_limit(1)} " +
+//      p"sel_0 ${exe_reg_d_sel(1)(0)(REG)} " +
+//      p"sel_1 ${exe_reg_d_sel(1)(1)(REG)}" +
+//      p"\n")
 ////    for (i <- 0 until nInst) {
 //      printf(
 //        p"issueQvalid ${issueQueue(1).issue.valid} " +
@@ -580,5 +579,5 @@ class BackEnd(implicit conf: CPUConfig) extends Module with BackParam {
 //      //      p"sel0 ${exe_reg_d_sel(1)(0)(REG)} " +
 //      //      p"sel1 ${exe_reg_d_sel(1)(1)(IMM)}" +
 //      p"\n")
-  }
+//  }
 }

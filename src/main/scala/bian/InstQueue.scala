@@ -298,29 +298,29 @@ class InstQueue(val n: Int) extends Module with InstParam {
     }
   }
 
-  when (CycRange(io.cyc,810,824)) {
-    if (n == 0) printf(p"${io.in.valid}->id ${io.in.bits.id} enter_tb ${inst_ctrl.enter_tb}" +
-      p" tidx1H ${inst_ctrl.tidx1H} f1 ${io.in.bits.info.f1} ${inst_table(8).f1}\n")
-    printf(p"instQueue_$n ")
-    printf(p"${io.issue.valid}->${io.issue.bits.id}(${inst_ctrl.issue_rsval(0)}," +
-      p"${inst_ctrl.issue_rsval(1)}) ${issue.entry.tidx} ${io.issue.bits.info.f1} ")
-    printf(p"count ${inst_ctrl.count} queue")
-    for (i <- 0 until nEntry) printf(
-      p" ${queue_valid(i)}->${inst_queue(i).id}(${inst_ctrl.limit(i)}:" +
-      p"${inst_ctrl.snoop(i)(0)},${inst_ctrl.snoop(i)(1)})")// +
-//      p" (${inst_ctrl.speed(i)(0)},${inst_ctrl.speed(i)(1)})" +
-//      p" ")
-    printf("\n")
-  }
-  if (n == 1) {
-    when (io.cyc === 1319.U) {
-      printf(p"fwd_ptr ${inst_ctrl.fwd_ptr} fwd_vec")
-      for (i <- 0 until nEntry) {
-        printf(p"${inst_ctrl.forward(i)} <${inst_ctrl.speed(i)(0)} ${inst_ctrl.speed(i)(1)}>")
-      }
-      printf("\n")
-    }
-  }
+//  when (CycRange(io.cyc,810,824)) {
+//    if (n == 0) printf(p"${io.in.valid}->id ${io.in.bits.id} enter_tb ${inst_ctrl.enter_tb}" +
+//      p" tidx1H ${inst_ctrl.tidx1H} f1 ${io.in.bits.info.f1} ${inst_table(8).f1}\n")
+//    printf(p"instQueue_$n ")
+//    printf(p"${io.issue.valid}->${io.issue.bits.id}(${inst_ctrl.issue_rsval(0)}," +
+//      p"${inst_ctrl.issue_rsval(1)}) ${issue.entry.tidx} ${io.issue.bits.info.f1} ")
+//    printf(p"count ${inst_ctrl.count} queue")
+//    for (i <- 0 until nEntry) printf(
+//      p" ${queue_valid(i)}->${inst_queue(i).id}(${inst_ctrl.limit(i)}:" +
+//      p"${inst_ctrl.snoop(i)(0)},${inst_ctrl.snoop(i)(1)})")// +
+////      p" (${inst_ctrl.speed(i)(0)},${inst_ctrl.speed(i)(1)})" +
+////      p" ")
+//    printf("\n")
+//  }
+//  if (n == 1) {
+//    when (io.cyc === 1319.U) {
+//      printf(p"fwd_ptr ${inst_ctrl.fwd_ptr} fwd_vec")
+//      for (i <- 0 until nEntry) {
+//        printf(p"${inst_ctrl.forward(i)} <${inst_ctrl.speed(i)(0)} ${inst_ctrl.speed(i)(1)}>")
+//      }
+//      printf("\n")
+//    }
+//  }
 //  printf(p"\nsnoop ${inst_ctrl.snoop}\n")
 //  printf(p"ready ${inst_ctrl.limit}\n")
 //  val cnt = RegInit(0.U(32.W))
