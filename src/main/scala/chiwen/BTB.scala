@@ -117,7 +117,7 @@ class BTB(implicit conf: CPUConfig) extends Module with BTBParams {
     }
   }.elsewhen(io.forward) {
     shift_reg := !predict.branch
-    when (shift_wire ) {
+    when (shift_wire) {
       gb_history := Cat(gb_history(wHistory-2,0), 0.U(1.W))
     }.elsewhen(predict.branch) {
       gb_history := Cat(gb_history(wHistory-2,0), predict.taken)
@@ -218,7 +218,7 @@ class BTB(implicit conf: CPUConfig) extends Module with BTBParams {
   }
 
   when (predict.valid /*&& io.if_pc.bits === "h80005920".U*/) {
-    printf("BTB: Cyc= %d pc %x redirect %x index %d select %d gshare %d hcount %d bht idx %x"
+    printf("BTB: Cyc= %d pc %x redirect %x index %d select %d gshare %d hcount %d bht idx %d <"
     , io.cyc
     , io.if_pc
     , io.predict.redirect
@@ -228,8 +228,8 @@ class BTB(implicit conf: CPUConfig) extends Module with BTBParams {
     , predict.h_count
     , gshare_xor
     )
-//    for (i <- 0 until 10) printf(p" ${gb_history(i)}")
-    printf("\n")
+    for (j <- 0 until 9) printf(p"${gb_history(j)},") //used for debug
+    printf(p"${gb_history(9)}>\n")
 //    when (CycRange(io.cyc, 773, 857)) {
 //      when (fb_reg.valid) {
 //        printf(p"${fb_reg.redirect}" +

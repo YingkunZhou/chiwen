@@ -321,23 +321,20 @@ class BackEnd(implicit conf: CPUConfig) extends Module with BTBParams {
   io.front.forward  := !stall.asUInt.orR
 
   // Printout
-//  printf("Core: Cyc= %d WB[ %x %x %x] (%x, %x, %x) %c %c %c ExeInst: DASM(%x)\n"
-//    , io.cyc
-//    , wb_wire.rf_wen
-//    , wb.wbaddr
-//    , wb_wbdata
-//    , io.front.pc
-//    , exe.pc
-//    , mem.pc
-//    , Mux(stall(Stage.MEM), Str("F"),             //FREEZE-> F
-//      Mux(stall(Stage.DEC), Str("S"), Str(" ")))  //STALL->S
-//    , Mux(alu.ctrl.pc_sel === 1.U, Str("B"),    //BJ -> B
-//      Mux(alu.ctrl.pc_sel === 2.U, Str("J"),    //JR -> J
-//      Mux(alu.ctrl.pc_sel === 3.U, Str("E"),    //EX -> E
-//      Mux(alu.ctrl.pc_sel === 0.U, Str(" "), Str("?")))))
-//    , Mux(csr.io.illegal, Str("X"), Str(" "))
-//    , Mux(io.front.xcpt.valid || !exe_valid, BUBBLE, exe.inst)
-//  )
+  printf("Core: Cyc= %d (%x, %x, %x) %c %c %c ExeInst: DASM(%x)\n"
+    , io.cyc
+    , io.front.pc
+    , exe.pc
+    , mem.pc
+    , Mux(stall(Stage.MEM), Str("F"),             //FREEZE-> F
+      Mux(stall(Stage.DEC), Str("S"), Str(" ")))  //STALL->S
+    , Mux(alu.ctrl.pc_sel === 1.U, Str("B"),    //BJ -> B
+      Mux(alu.ctrl.pc_sel === 2.U, Str("J"),    //JR -> J
+      Mux(alu.ctrl.pc_sel === 3.U, Str("E"),    //EX -> E
+      Mux(alu.ctrl.pc_sel === 0.U, Str(" "), Str("?")))))
+    , Mux(csr.io.illegal, Str("X"), Str(" "))
+    , Mux(io.front.xcpt.valid || !exe_valid, BUBBLE, exe.inst)
+  )
   when (wb_valid) {
     printf("Core: Cyc= %d WB[ %x %x %x]\n"
       , io.cyc
