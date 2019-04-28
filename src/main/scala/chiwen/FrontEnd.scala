@@ -60,6 +60,9 @@ class FrontEnd (implicit conf: CPUConfig) extends Module with BTBParams {
       if_pc_plus))
   }
   when (fetchi.pc_forward) { if_reg_pc := if_pc_next }
+  when (!io.back.forward && io.back.inst.valid) {
+    printf("STALL\n")
+  }
 }
 
 
